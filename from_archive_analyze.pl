@@ -68,25 +68,18 @@ my $uploads_dir = "/results/uploads";
 my $new_run_dir = "$uploads_dir/$run_name";
 my $cwd = getcwd();
 
-print "archive: $archive\n";
-print "run name: $run_name\n";
-print "new dir: $new_run_dir\n";
-
 print "Creating a new directory to extract the archive into for re-analsyis...\n";
 mkdir $new_run_dir if ( ! -d $new_run_dir );
 
 # Extract Tarball
-#print "Extracting the experiment archive to '$new_run_dir'...\n";
-#if ( system( "tar xvfz $archive -C $new_run_dir" ) != 0 ) {
-    #print "ERROR: The tarball could not be extracted\n";
-    #printf "Child died with signal %d, %s coredump\n", ($? & 127), ($? & 128) ? 'with' : 'without';
-    #exit $?;
-#} else {
-    #print "Tarball '$archive' successfully extracted to '$new_run_dir'\n";
-#}
-
-# TODO: Check that this will be the best way.  This will extract the whole archive, and it may be better to just keep 
-#       a subset of data around for re-analysis.  
+print "Extracting the experiment archive to '$new_run_dir'...\n";
+if ( system( "tar xvfz $archive -C $new_run_dir" ) != 0 ) {
+    print "ERROR: The tarball could not be extracted\n";
+    printf "Child died with signal %d, %s coredump\n", ($? & 127), ($? & 128) ? 'with' : 'without';
+    exit $?;
+} else {
+    print "Tarball '$archive' successfully extracted to '$new_run_dir'\n";
+}
 
 # Get the samplekey
 chdir( $new_run_dir );
@@ -114,7 +107,7 @@ if ( ! -e "analysis_return_code.txt" ) {
 
 # Launch analysis
 print "Starting analysis on '$run_name'\n";
-#system( "python /opt/ion/iondb/bin/from_wells_analysis.py $new_run_dir" );
+system( "python /opt/ion/iondb/bin/from_wells_analysis.py $new_run_dir" );
 
 sub return_code_gen {
     # Generate an analysis return code if one does not exist
