@@ -13,10 +13,12 @@
 # 2/18/2014 -  v2.1.0: Fixed bug in incorrectly passing elements to R.  Array counts going in instead of 
 #              list of variants, making the Venn Diagrams incorrect.
 #
+# 2/19/2014 - v2.2.0:  Fixed the start with CSV option.  I added the command line option, but never actually
+#                      coded a way to use it in the script!  Now should be able to start with a CSV file
+#                      instead of an XLS file.
+#
 # TODO:
 #     - Make the 'version' information more flexible for differnt binning of samples.  Maybe a CLI option?
-#     - Fix the draw_venn function so that if there are no venns to be drawn (e.g. no aMOIs in samples), we 
-#       don't get an R error but something nicer.
 #
 # D Sims - 12/4/2013
 #############################################################################################################
@@ -29,7 +31,7 @@ use Data::Dump;
 use File::Basename;
 
 ( my $scriptname = $0 ) =~ s/^(.*\/)+//;
-my $version = "v2.1.0";
+my $version = "v2.2.0";
 my $description = <<"EOT";
 Read in up to four XLS files generated from GeneMed or CSV files generated from those reports, and create
 a venn diagram that compares the up to three samples.  This program was written with the Ion Torrent MPACT assay
@@ -47,7 +49,8 @@ EOT
 
 my $usage = <<"EOT";
 USAGE: $scriptname [options] <gm_report_1, 2, 3, etc>
-    -c, --csv           Start with CSV file instead of XLS file
+    -c, --csv           Start with CSV file instead of XLS file. Be sure to use the same naming scheme as listed above
+    -o, --output        Prefix to use for the output data.  Helpful in the case of CEPH analysis (for example).
     -v, --version       Version information
     -h, --help          Print this help information
 EOT
@@ -55,8 +58,10 @@ EOT
 my $help;
 my $ver_info;
 my $starting_input;
+my $out_prefix;
 
 GetOptions( "csv"         => \$starting_input,
+            "output=s"    => \$out_prefix,
             "version"     => \$ver_info,
             "help"        => \$help )
         or print $usage;
@@ -85,13 +90,25 @@ if ( @ARGV < 2 ) {
 my %results;
 my $cwd = getcwd;
 my @datasets = @ARGV;
-my ($csv_file, $analysis_version, $sample);
+my ($csv_file, $analysis_version, $sample, $gm_id, $run_num);
 
 # Read in GM reports and generate a csv file to be used with rest of analysis.
-foreach ( @datasets) {
-    ( $csv_file, $analysis_version, $sample ) = generate_csv( \$_ );
-    import_csv( \$csv_file, \$analysis_version );
+if ( $starting_input ) {
+    foreach $csv_file ( @datasets ) {
+        ($gm_id, $sample, $run_num, undef, $analysis_version) = split( /_/, basename( $csv_file ) );
+        ($analysis_version) =~ s/\.csv//;
+        import_csv( \$csv_file, \$analysis_version );
+    }
+} else {
+    foreach ( @datasets) {
+        ( $csv_file, $analysis_version, $sample ) = generate_csv( \$_ );
+        import_csv( \$csv_file, \$analysis_version );
+    }
 }
+
+$sample .= "_$out_prefix" if ( $out_prefix );
+#print "new sample name: $sample\n";
+#exit;
 
 # Generate a output table that can be fed into R for drawing a Venn Diagram
 my ($all_vars, $amois) = venn_table( \%results, \$sample );
@@ -208,6 +225,10 @@ sub draw_venn {
     if ( @categories > 4 ) {
         print "ERROR: more than 4 datasets detected.  We can not use this to draw more than a 4-way Venn Diagram\n";
         exit 1;
+    }
+    elsif ( @categories < 1 ) {
+        print "No data to be plotted.  Check the <sample>_venn_data.txt file to find out why.\n";
+        exit;
     }
 
     (my $venn_outfile = $title) =~ s/\s/_/g;
