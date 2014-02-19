@@ -20,4 +20,5 @@ a reanalysis of the experiment using the current software version
 extract the whole dataset or a specific variant by position, and print out a simplified variant call
 listing.
 
-- genemed_compare.pl: Starting with the XLS GeneMed reports, compare 
+- genemed_compare.pl: Starting with either the XLS or a CSV derived from the XLS report, compare GeneMed
+output from different versions of the Torrent Variant Caller
