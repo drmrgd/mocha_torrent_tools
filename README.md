@@ -19,3 +19,5 @@ a reanalysis of the experiment using the current software version
 - vcfExtractor.pl: A program to extract data from VCF files generated from the TS v4.0.  Can either
 extract the whole dataset or a specific variant by position, and print out a simplified variant call
 listing.
+
+- genemed_compare.pl: Starting with the XLS GeneMed reports, compare 
