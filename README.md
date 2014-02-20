@@ -24,6 +24,10 @@ a reanalysis of the experiment using the current software version.
 - <b>genemed_compare.pl</b>: Starting with either the XLS or a CSV derived from the XLS report, compare GeneMed
 output from different versions of the Torrent Variant Caller.
 
+- <b>mocha_mirror.pl</b>: Script to mirror processed Ion Torrent report data to an external harddrive.  The 
+program will store as many runs as can fit on the drive by assessing the du of the drive and pushing the 
+newest runs onto the stack.  This will, of course, remove older runs that won't fit.
+
 - <b>vcfExtractor.pl</b>: A program to extract data from VCF files generated from the TS v4.0.  Can either
 extract the whole dataset or a specific variant by position, and print out a simplified variant call
 listing.
