@@ -36,7 +36,7 @@ use Digest::MD5;
 use File::Path qw{ remove_tree };
 use Data::Dump;
 
-my $debug = 0;
+my $debug = 1;
 
 ( my $scriptname = $0 ) =~ s/^(.*\/)+//;
 my $version = "v1.3.0";
@@ -119,6 +119,13 @@ if ( ! defined $resultsDir ) {
 	print "The results directory '$resultsDir' can not be found.\n";
 	exit 1;
 }
+
+# Find out what TS version running in order to customize some downstream functions
+open( my $explog_fh, "<", "$resultsDir/explog.txt" ) || die "Can't open the explog.txt file for reading: $!";
+(my $ts_version) = grep { /PGM SW Release:\s+(\d\.\d\.\d)$/ } <$explog_fh>;
+
+print "version: $ts_version\n";
+exit;
 
 # TODO: Setup custom and default output names
 my ( $run_name ) = $resultsDir =~ /Auto_user_([PM]CC-\d+.*_\d+)\/?$/;
