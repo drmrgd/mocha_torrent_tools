@@ -20,6 +20,8 @@
 # 01/10/2014 v1.3.0 - collectedVariants directory now optional.  Added code to remove it from the archive
 #                     list if not present as varCollector now takes up the slack of that utility.  Script
 #                     will still add the directory if it exists, though.
+# 04/15/2014 v1.4.041514 - Bug fix for sampleKeyGen in export function.  Need to further vet this fix, but 
+#                          for now should do to correctly generate a sample key.
 #
 # 4/12/13 - D Sims
 #
@@ -36,10 +38,10 @@ use Digest::MD5;
 use File::Path qw{ remove_tree };
 use Data::Dump;
 
-my $debug = 1;
+my $debug = 0;
 
 ( my $scriptname = $0 ) =~ s/^(.*\/)+//;
-my $version = "v1.3.0";
+my $version = "v1.4.041514";
 my $description = <<"EOT";
 Program to grab data from an Ion Torrent Run and either archive it, or create a directory that can be imported 
 to another analysis computer for processing.  
@@ -122,10 +124,7 @@ if ( ! defined $resultsDir ) {
 
 # Find out what TS version running in order to customize some downstream functions
 open( my $explog_fh, "<", "$resultsDir/explog.txt" ) || die "Can't open the explog.txt file for reading: $!";
-(my $ts_version) = grep { /PGM SW Release:\s+(\d\.\d\.\d)$/ } <$explog_fh>;
-
-print "version: $ts_version\n";
-exit;
+(my $ts_version) = map { /PGM SW Release:\s+(\d\.\d\.\d)$/ } <$explog_fh>;
 
 # TODO: Setup custom and default output names
 my ( $run_name ) = $resultsDir =~ /Auto_user_([PM]CC-\d+.*_\d+)\/?$/;
@@ -183,17 +182,29 @@ if ( $purpose == 1 ) {
 	system( "mkdir -p $destination_dir/$output/sigproc_results/" );
 	my $sigproc_out = "$destination_dir/$output/sigproc_results/";
 	
-	if ( -e "$resultsDir/collectedVariants/sampleKey.txt" ) {
+    if ( -f "$resultsDir/plugin_out/varCollector_out/sampleKey.txt" ) {
+        print "Sample key file located in varCollector plugin data. Adding to export data package.\n";
+        push( @exportFileList, "plugin_out/varCollector_out/sampleKey.txt" );
+    }
+    elsif ( -f "$resultsDir/collectedVariants/sampleKey.txt" ) {
 		print "SampleKey file located in 'collectedVariants/'.  Adding to export data package.\n";
-		push( @exportFileList, "collectedVariants/sampleKey.txt" );
-		
+		push( @exportFileList, "collectedVariants/sampleKey.txt" );		
 	} else {
 		print "No sampleKey file located.  Creating a new one to include in export package.\n";
-		eval {
-			system( "sampleKeyGen -o $resultsDir/sampleKey.txt /opt/mocha/varCollector/resources/bcIndex.txt ${resultsDir}ion_params_00.json" );
-		};
+        (my $major_version = $ts_version) =~ /(\d)\..*/;
+
+        if ( $major_version == 3 ) {
+            eval {
+                print "Using TSv3.2.1 sampleKeyGen scripts.\n";
+                system( "sampleKeyGen -o $resultsDir/sampleKey.txt /opt/mocha/varCollector/resources/bcIndex.txt ${resultsDir}ion_params_00.json" );
+            };
+        } else {
+            print "Using TSv4.0.2 sampleKeyGen scripts.\n";
+            eval { system( "sampleKeyGen -o $resultsDir/sampleKey.txt" );
+            };
+        }
 		print "ERROR: SampleKeyGen Script encountered errors: $@" if $@;
-		push( @exportFileList, 'sampleKey.txt' );
+		push( @exportFileList, "$resultsDir/sampleKey.txt" );
 		
 	}
 		if ($debug == 1) {
