@@ -10,6 +10,15 @@ List of Programs
 The current programs that are in this repository with a brief description.  See the individual program's
 help text for more details.
 
+- <b>batch_loader.pl</b>: From a SQL Run Plan dump file, batch run change of plans on experiments to be
+batched. <i>Still working on this.  Want to add ability to actually launch the analysis too</i>
+
+- <b>batch_planner.pl</b>: Create a CSV file to upload into the Torrent Browser run planner in order to 
+batch process several samples.  Currently only have 32 barcodes set up, and this will not add in the 
+rest of the information required to run (e.g. plan template, plugins, reference, etc.).  Can easily
+copy and paste this into a fully formatted template that's been downloaded from the TS.  Run before 
+batch_loader.pl.
+
 - <b>change_of_plans.pl</b>: Simple program to create a new explog.txt file from the original (making
 a backup copy of the original first) that can be used to when reanalyzing an Ion Torrent Run.  This 
 will allow the run plan in the DB to associate with the data in order to link plugins, sample names,
