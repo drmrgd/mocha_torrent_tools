@@ -366,8 +366,9 @@ sub archive_data {
 	
 	# Check md5sum of archive against generated md5sum.txt file
 	chdir( $tmpdir );
-	
+    print $msg timestamp('timestamp') . " Confirming MD5sum of tarball.\n";
 	my $md5check = system( "md5sum -c 'md5sum.txt' >/dev/null" );
+
 	if ( $? == 0 ) {
 		print $msg timestamp('timestamp') . " The archive is intact and not corrupt\n";
 		chdir( $cwd ) || die "Can't change directory to '$cwd': $!";
