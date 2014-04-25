@@ -43,7 +43,7 @@ use Digest::MD5;
 use File::Path qw{ remove_tree };
 use Data::Dump;
 
-my $debug = 0;
+my $debug = 1;
 
 my $scriptname = basename($0);
 my $version = "v1.5.042514";
@@ -210,7 +210,7 @@ if ( $purpose == 1 ) {
         if ( $major_version == 3 ) {
             eval {
                 print "Using TSv3.2.1 sampleKeyGen scripts.\n";
-                system( "sampleKeyGen -o $resultsDir/sampleKey.txt /opt/mocha/varCollector/resources/bcIndex.txt ${resultsDir}ion_params_00.json" );
+                system( "sampleKeyGen32 -o $resultsDir/sampleKey.txt /opt/mocha-tools/varCollector/resources/bcIndex.txt ${resultsDir}ion_params_00.json" );
             };
         } else {
             print "Using TSv4.0.2 sampleKeyGen scripts.\n";
@@ -324,9 +324,11 @@ sub copy_data {
 sub archive_data {
 	my $filelist = shift;
 	my $archivename = shift;
-	my $path = "/media/Aperio/";
 	my $cwd = getcwd;
-
+	#my $path = "/media/Aperio/";
+	my $path;
+    ($outdir) ? ($path = $destination_dir) : ($path = '/media/Aperio/');
+    
 	# Create a checksum file for all of the files in the archive and add it to the tarball 
 	print $msg timestamp('timestamp') . " Creating an md5sum list for all archive files.\n";
 	if ( -e 'md5sum.txt' ) {
@@ -397,10 +399,10 @@ sub archive_data {
 	print "DEBUG: path => $path\n" if $debug == 1;
 	
 	if ( copy( $archivename, $path ) == 0 ) {
-		print $msg timestamp('timestamp') . " Copying archive to storage drive failed: $!.\n"; 
+		print $msg timestamp('timestamp') . " Copying archive to storage device: $!.\n"; 
 		return 0;
 	} else {
-		print $msg timestamp('timestamp') . " Archive successfully copied to Aperio fileshare.\n";
+		print $msg timestamp('timestamp') . " Archive successfully copied to archive storage device.\n";
 	}
 
 	# check integrity of the tarball
