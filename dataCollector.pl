@@ -23,6 +23,10 @@
 # 04/15/2014 v1.4.041514 - Bug fix for sampleKeyGen in export function.  Need to further vet this fix, but 
 #                          for now should do to correctly generate a sample key.
 #
+# 04/25/2014 v1.5.042514  - Added custom output directory.  Removed mandatory /media/Aperio checking / 
+#                           mounting so that we can archive from either clinical or R&D instrument if 
+#                           desired.  
+#
 # 4/12/13 - D Sims
 #
 ############################################################################################################
@@ -30,6 +34,7 @@
 use warnings;
 use strict;
 use File::Copy;
+use File::Basename;
 use IO::Tee;
 use POSIX qw{ strftime };
 use Text::Wrap;
@@ -40,8 +45,8 @@ use Data::Dump;
 
 my $debug = 0;
 
-( my $scriptname = $0 ) =~ s/^(.*\/)+//;
-my $version = "v1.4.041514";
+my $scriptname = basename($0);
+my $version = "v1.5.042514";
 my $description = <<"EOT";
 Program to grab data from an Ion Torrent Run and either archive it, or create a directory that can be imported 
 to another analysis computer for processing.  
@@ -62,7 +67,8 @@ my $usage = <<"EOT";
 USAGE: $scriptname [options] [-a | -e] <results dir>
     -a, --archive    Create tarball archive of the run data
     -e, --extract    Extract the data for re-analysis on another computer.
-    -o, --output     Custom output file name.  Default is 'run_name.mmddyyy'
+    -o, --output     Custom output file name.  (DEFAULT: 'run_name.mmddyyy')
+    -d, --dir        Custom output directory (DEFAULT: /results/xfer/)
     -q, --quiet      Run quietly without sending messages to STDOUT
     -v, --version    Version Information
     -h, --help       Display the help information
@@ -83,6 +89,7 @@ my $help = 0;
 my $purpose;
 my $output;
 my $quiet = 0;
+my $outdir;
 
 while ( scalar( @ARGV ) > 0 ) {
 	last if ( $ARGV[0] !~ /^-/ );
@@ -93,6 +100,7 @@ while ( scalar( @ARGV ) > 0 ) {
 	elsif ( $opt eq '-e' || $opt eq '--extract' )  { $purpose = 1; }
 	elsif ( $opt eq '-a' || $opt eq '--archive' )  { $purpose = 2; }
 	elsif ( $opt eq '-o' || $opt eq '--output' )   { $output = shift; }
+    elsif ( $opt eq '-d' || $opt eq '--dir' )      { $outdir = shift; }
 	else {
 		print "$scriptname: Invalid option: $opt\n\n";
 		print "$usage\n";
@@ -126,11 +134,18 @@ if ( ! defined $resultsDir ) {
 open( my $explog_fh, "<", "$resultsDir/explog.txt" ) || die "Can't open the explog.txt file for reading: $!";
 (my $ts_version) = map { /PGM SW Release:\s+(\d\.\d\.\d)$/ } <$explog_fh>;
 
-# TODO: Setup custom and default output names
+# Setup custom and default output names
+# TODO: May have to modify for new PGM coming in.
 my ( $run_name ) = $resultsDir =~ /Auto_user_([PM]CC-\d+.*_\d+)\/?$/;
-
 $output = "$run_name." . timestamp('date') if ( ! defined $output );
-my $destination_dir = '/results/xfer';
+
+#my $destination_dir = '/results/xfer' ;
+my $destination_dir;
+( $outdir ) ? ($destination_dir = $outdir) : ($destination_dir = '/results/xfer');
+if ( ! -e $outdir ) {
+    print "ERROR: The destination directory '$destination_dir' does exist.  Check the path.\n";
+    exit 1;
+}
 
 # Create logfile for archive process
 my $logfile = "/var/log/mocha/archive.log";
@@ -146,7 +161,6 @@ if ( $quiet == 1 ) {
 }
 
 # Format the logfile output
-#my ( $cols, $rows ) = Term::Size::chars *STDOUT{IO}; # use terminal sizeto define columns
 $Text::Wrap::columns = 123;
 my $space = ' ' x ( length( timestamp('timestamp') ) + 3 );
 
