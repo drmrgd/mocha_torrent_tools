@@ -125,10 +125,6 @@ open( my $explog_fh, "<", "$resultsDir/explog.txt" ) || die "Can't open the expl
 my ( $run_name ) = $resultsDir =~ /Auto_user_((?:[PM]CC|MC[12])-\d+.*_\d+)\/?$/;
 $output = "$run_name." . timestamp('date') if ( ! defined $output );
 
-print "run_name: $run_name\n";
-print "output: $output\n";
-exit;
-
 #my $destination_dir = '/results/xfer' ;
 my $destination_dir;
 ( $outdir ) ? ($destination_dir = $outdir) : ($destination_dir = '/results/xfer');
