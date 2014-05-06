@@ -13,20 +13,6 @@
 # TODO:  
 #     - Add mount sub for Aperio cifs drive
 #
-# 12/17/2013 v1.1.0 - Automatically create tarball of data from extract function.
-# 12/18/2013 v1.2.0 - Bug fix for tarball creation in the extract function.
-# 01/09/2014 v1.2.1 - Username added to logfile output in the event the a backup user will have to run the
-#                     archive utility.
-# 01/10/2014 v1.3.0 - collectedVariants directory now optional.  Added code to remove it from the archive
-#                     list if not present as varCollector now takes up the slack of that utility.  Script
-#                     will still add the directory if it exists, though.
-# 04/15/2014 v1.4.041514 - Bug fix for sampleKeyGen in export function.  Need to further vet this fix, but 
-#                          for now should do to correctly generate a sample key.
-#
-# 04/25/2014 v1.5.042514  - Added custom output directory.  Removed mandatory /media/Aperio checking / 
-#                           mounting so that we can archive from either clinical or R&D instrument if 
-#                           desired.  
-#
 # 4/12/13 - D Sims
 #
 ############################################################################################################
@@ -46,7 +32,7 @@ use Data::Dump;
 my $debug = 1;
 
 my $scriptname = basename($0);
-my $version = "v1.5.042514";
+my $version = "v1.6.050614";
 my $description = <<"EOT";
 Program to grab data from an Ion Torrent Run and either archive it, or create a directory that can be imported 
 to another analysis computer for processing.  
@@ -135,9 +121,13 @@ open( my $explog_fh, "<", "$resultsDir/explog.txt" ) || die "Can't open the expl
 (my $ts_version) = map { /PGM SW Release:\s+(\d\.\d\.\d)$/ } <$explog_fh>;
 
 # Setup custom and default output names
-# TODO: May have to modify for new PGM coming in.
-my ( $run_name ) = $resultsDir =~ /Auto_user_([PM]CC-\d+.*_\d+)\/?$/;
+#my ( $run_name ) = $resultsDir =~ /Auto_user_([PM]CC-\d+.*_\d+)\/?$/;
+my ( $run_name ) = $resultsDir =~ /Auto_user_((?:[PM]CC|MC[12])-\d+.*_\d+)\/?$/;
 $output = "$run_name." . timestamp('date') if ( ! defined $output );
+
+print "run_name: $run_name\n";
+print "output: $output\n";
+exit;
 
 #my $destination_dir = '/results/xfer' ;
 my $destination_dir;
