@@ -8,11 +8,12 @@
 use warnings;
 use strict;
 use Getopt::Long;
+use File::Basename;
 use File::Copy;
 use Data::Dumper;
 
-( my $scriptname = $0 ) =~ s/^(.*\/)+//;
-my $version = "v1.0.0";
+my $scriptname = basename($0);
+my $version = "v1.1.041614";
 my $description = <<"EOT";
 Program to change the explog.txt file of an imported run.  The TS will not assign sample information
 defined in a run plan unless it matches the guid and (potentially) the short id of the explog.txt 
@@ -95,6 +96,7 @@ if ( $file ) {
 	open( my $out_fh, ">", "explog.txt" ) || die "Can't open the next explog.txt file for writing: $!";
 	
 	for my $line ( @explog_data ) {
+        $line =~ s/^(Project:\s+).*/$1/ if ( $line =~ /Project/ );
 		$line =~ s/^(Planned Run Short ID:).*/$1 $short_id/ if ( $line =~ /Short ID/ );
 		$line =~ s/^(Planned Run GUID:).*/$1 $guid/ if ( $line =~ /GUID/ );
 	}

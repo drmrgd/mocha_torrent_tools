@@ -13,16 +13,6 @@
 # TODO:  
 #     - Add mount sub for Aperio cifs drive
 #
-# 12/17/2013 v1.1.0 - Automatically create tarball of data from extract function.
-# 12/18/2013 v1.2.0 - Bug fix for tarball creation in the extract function.
-# 01/09/2014 v1.2.1 - Username added to logfile output in the event the a backup user will have to run the
-#                     archive utility.
-# 01/10/2014 v1.3.0 - collectedVariants directory now optional.  Added code to remove it from the archive
-#                     list if not present as varCollector now takes up the slack of that utility.  Script
-#                     will still add the directory if it exists, though.
-# 04/15/2014 v1.4.041514 - Bug fix for sampleKeyGen in export function.  Need to further vet this fix, but 
-#                          for now should do to correctly generate a sample key.
-#
 # 4/12/13 - D Sims
 #
 ############################################################################################################
@@ -30,6 +20,7 @@
 use warnings;
 use strict;
 use File::Copy;
+use File::Basename;
 use IO::Tee;
 use POSIX qw{ strftime };
 use Text::Wrap;
@@ -38,10 +29,10 @@ use Digest::MD5;
 use File::Path qw{ remove_tree };
 use Data::Dump;
 
-my $debug = 0;
+my $debug = 1;
 
-( my $scriptname = $0 ) =~ s/^(.*\/)+//;
-my $version = "v1.4.041514";
+my $scriptname = basename($0);
+my $version = "v1.6.050614";
 my $description = <<"EOT";
 Program to grab data from an Ion Torrent Run and either archive it, or create a directory that can be imported 
 to another analysis computer for processing.  
@@ -62,7 +53,8 @@ my $usage = <<"EOT";
 USAGE: $scriptname [options] [-a | -e] <results dir>
     -a, --archive    Create tarball archive of the run data
     -e, --extract    Extract the data for re-analysis on another computer.
-    -o, --output     Custom output file name.  Default is 'run_name.mmddyyy'
+    -o, --output     Custom output file name.  (DEFAULT: 'run_name.mmddyyy')
+    -d, --dir        Custom output directory (DEFAULT: /results/xfer/)
     -q, --quiet      Run quietly without sending messages to STDOUT
     -v, --version    Version Information
     -h, --help       Display the help information
@@ -83,6 +75,7 @@ my $help = 0;
 my $purpose;
 my $output;
 my $quiet = 0;
+my $outdir;
 
 while ( scalar( @ARGV ) > 0 ) {
 	last if ( $ARGV[0] !~ /^-/ );
@@ -93,6 +86,7 @@ while ( scalar( @ARGV ) > 0 ) {
 	elsif ( $opt eq '-e' || $opt eq '--extract' )  { $purpose = 1; }
 	elsif ( $opt eq '-a' || $opt eq '--archive' )  { $purpose = 2; }
 	elsif ( $opt eq '-o' || $opt eq '--output' )   { $output = shift; }
+    elsif ( $opt eq '-d' || $opt eq '--dir' )      { $outdir = shift; }
 	else {
 		print "$scriptname: Invalid option: $opt\n\n";
 		print "$usage\n";
@@ -126,11 +120,18 @@ if ( ! defined $resultsDir ) {
 open( my $explog_fh, "<", "$resultsDir/explog.txt" ) || die "Can't open the explog.txt file for reading: $!";
 (my $ts_version) = map { /PGM SW Release:\s+(\d\.\d\.\d)$/ } <$explog_fh>;
 
-# TODO: Setup custom and default output names
-my ( $run_name ) = $resultsDir =~ /Auto_user_([PM]CC-\d+.*_\d+)\/?$/;
-
+# Setup custom and default output names
+#my ( $run_name ) = $resultsDir =~ /Auto_user_([PM]CC-\d+.*_\d+)\/?$/;
+my ( $run_name ) = $resultsDir =~ /Auto_user_((?:[PM]CC|MC[12])-\d+.*_\d+)\/?$/;
 $output = "$run_name." . timestamp('date') if ( ! defined $output );
-my $destination_dir = '/results/xfer';
+
+#my $destination_dir = '/results/xfer' ;
+my $destination_dir;
+( $outdir ) ? ($destination_dir = $outdir) : ($destination_dir = '/results/xfer');
+if ( ! -e $outdir ) {
+    print "ERROR: The destination directory '$destination_dir' does exist.  Check the path.\n";
+    exit 1;
+}
 
 # Create logfile for archive process
 my $logfile = "/var/log/mocha/archive.log";
@@ -146,7 +147,6 @@ if ( $quiet == 1 ) {
 }
 
 # Format the logfile output
-#my ( $cols, $rows ) = Term::Size::chars *STDOUT{IO}; # use terminal sizeto define columns
 $Text::Wrap::columns = 123;
 my $space = ' ' x ( length( timestamp('timestamp') ) + 3 );
 
@@ -196,7 +196,7 @@ if ( $purpose == 1 ) {
         if ( $major_version == 3 ) {
             eval {
                 print "Using TSv3.2.1 sampleKeyGen scripts.\n";
-                system( "sampleKeyGen -o $resultsDir/sampleKey.txt /opt/mocha/varCollector/resources/bcIndex.txt ${resultsDir}ion_params_00.json" );
+                system( "sampleKeyGen32 -o $resultsDir/sampleKey.txt /opt/mocha-tools/varCollector/resources/bcIndex.txt ${resultsDir}ion_params_00.json" );
             };
         } else {
             print "Using TSv4.0.2 sampleKeyGen scripts.\n";
@@ -310,9 +310,11 @@ sub copy_data {
 sub archive_data {
 	my $filelist = shift;
 	my $archivename = shift;
-	my $path = "/media/Aperio/";
 	my $cwd = getcwd;
-
+	#my $path = "/media/Aperio/";
+	my $path;
+    ($outdir) ? ($path = $destination_dir) : ($path = '/media/Aperio/');
+    
 	# Create a checksum file for all of the files in the archive and add it to the tarball 
 	print $msg timestamp('timestamp') . " Creating an md5sum list for all archive files.\n";
 	if ( -e 'md5sum.txt' ) {
@@ -350,8 +352,9 @@ sub archive_data {
 	
 	# Check md5sum of archive against generated md5sum.txt file
 	chdir( $tmpdir );
-	
+    print $msg timestamp('timestamp') . " Confirming MD5sum of tarball.\n";
 	my $md5check = system( "md5sum -c 'md5sum.txt' >/dev/null" );
+
 	if ( $? == 0 ) {
 		print $msg timestamp('timestamp') . " The archive is intact and not corrupt\n";
 		chdir( $cwd ) || die "Can't change directory to '$cwd': $!";
@@ -383,10 +386,10 @@ sub archive_data {
 	print "DEBUG: path => $path\n" if $debug == 1;
 	
 	if ( copy( $archivename, $path ) == 0 ) {
-		print $msg timestamp('timestamp') . " Copying archive to storage drive failed: $!.\n"; 
+		print $msg timestamp('timestamp') . " Copying archive to storage device: $!.\n"; 
 		return 0;
 	} else {
-		print $msg timestamp('timestamp') . " Archive successfully copied to Aperio fileshare.\n";
+		print $msg timestamp('timestamp') . " Archive successfully copied to archive storage device.\n";
 	}
 
 	# check integrity of the tarball
