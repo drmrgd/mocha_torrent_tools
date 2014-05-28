@@ -32,7 +32,7 @@ use Data::Dump;
 my $debug = 1;
 
 my $scriptname = basename($0);
-my $version = "v1.6.050614";
+my $version = "v1.7.052714";
 my $description = <<"EOT";
 Program to grab data from an Ion Torrent Run and either archive it, or create a directory that can be imported 
 to another analysis computer for processing.  
@@ -394,8 +394,8 @@ sub archive_data {
 
 	# check integrity of the tarball
 	print $msg timestamp('timestamp') . " Calculating MD5 hash for copied archive.\n";
-	my $moved_archive = $path.$archivename;
-	
+    my $moved_archive = "$path/$archivename";
+
 	open( my $post_fh, "<", $moved_archive ) || die "Can't open the archive tarball for reading: $!";
 	binmode( $post_fh );
 	my $post_tarball_md5 = Digest::MD5->new->addfile($post_fh)->hexdigest;
@@ -458,7 +458,7 @@ sub process_md5_files {
 	# Since symlinks can cause downstrem problems is the dir structure changes, skip adding these to the md5sum check
 	foreach my $file ( @$filelist ) {
 		if ( -l $file ) {
-			print "DEBUG: file '$file' is a sym link.  Skipping...\n" if $debug == 1;
+			#print "DEBUG: file '$file' is a sym link.  Skipping...\n" if $debug == 1;
 			next;
 		}
 		#print "Processing '$file'...\n";
