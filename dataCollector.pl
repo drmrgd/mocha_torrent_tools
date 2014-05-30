@@ -32,7 +32,7 @@ use Data::Dump;
 my $debug = 1;
 
 my $scriptname = basename($0);
-my $version = "v1.7.052714";
+my $version = "v1.8.053014";
 my $description = <<"EOT";
 Program to grab data from an Ion Torrent Run and either archive it, or create a directory that can be imported 
 to another analysis computer for processing.  
@@ -54,7 +54,7 @@ USAGE: $scriptname [options] [-a | -e] <results dir>
     -a, --archive    Create tarball archive of the run data
     -e, --extract    Extract the data for re-analysis on another computer.
     -o, --output     Custom output file name.  (DEFAULT: 'run_name.mmddyyy')
-    -d, --dir        Custom output directory (DEFAULT: /results/xfer/)
+    -d, --dir        Custom output / destination  directory (DEFAULT: /results/xfer/)
     -q, --quiet      Run quietly without sending messages to STDOUT
     -v, --version    Version Information
     -h, --help       Display the help information
@@ -75,7 +75,7 @@ my $help = 0;
 my $purpose;
 my $output;
 my $quiet = 0;
-my $outdir;
+my $outdir='';
 
 while ( scalar( @ARGV ) > 0 ) {
 	last if ( $ARGV[0] !~ /^-/ );
@@ -128,13 +128,15 @@ $output = "$run_name." . timestamp('date') if ( ! defined $output );
 #my $destination_dir = '/results/xfer' ;
 my $destination_dir;
 ( $outdir ) ? ($destination_dir = $outdir) : ($destination_dir = '/results/xfer');
-if ( ! -e $outdir ) {
+
+if ( ! -e $destination_dir ) {
     print "ERROR: The destination directory '$destination_dir' does exist.  Check the path.\n";
     exit 1;
 }
 
 # Create logfile for archive process
-my $logfile = "/var/log/mocha/archive.log";
+#my $logfile = "/var/log/mocha/archive.log";
+my $logfile = "/home/ionadmin/testing.log";
 open( my $log_fh, ">>", $logfile ) || die "Can't open the logfile '$logfile' for writing\n";
 
 # Direct script messages to either a logfile or both STDOUT and a logfile
@@ -174,6 +176,8 @@ my @exportFileList = qw{
 my @archivelist = qw{ 
 	ion_params_00.json
 	collectedVariants
+    basecaller_results/datasets_basecaller.json
+    basecaller_results/datasets_pipeline.json
 };
 
 # Just run the export subroutine for pushing data to a different server
@@ -250,6 +254,7 @@ if ( $purpose == 1 ) {
 	print "Finished copying data package for export.  Data ready in '$destination_dir'\n";
 }
 
+# XXX
 # Run full archive on data.
 if ( $purpose == 2 ) {
 	chdir( $resultsDir ) || die "Can not access the results directory selected: $resultsDir. $!";
@@ -258,7 +263,7 @@ if ( $purpose == 2 ) {
 	
 	# Add in extra BAM files and such
 	my @data = grep { -f } glob( '*.barcode.bam.zip *.support.zip' );
-	my @plugins = grep { -d } glob( 'plugin_out/AmpliconCoveragePlots* plugin_out/variantCaller* plugin_out/varCollector*' );
+	my @plugins = grep { -d } glob( 'plugin_out/AmpliconCoveragePlots* plugin_out/variantCaller* plugin_out/varCollector* plugin_out/AmpliconCoverageAnalysis*' );
 
 	push( @archivelist, $_ ) for @data;
 	push( @archivelist, $_ ) for @exportFileList;
@@ -266,29 +271,38 @@ if ( $purpose == 2 ) {
 
 	# Add check to be sure that all of the results dirs and logs are there. Exit otherwise so we don't miss anything
 	if ( ! -e "collectedVariants" ) {
-		#print $msg &timestamp('timestamp') . " ERROR: collectedVariants directory is missing. Did you run varCollector?\n";
 		print $msg timestamp('timestamp') . " INFO: collectedVariants directory is not present. Skipping.\n";
-        my $index = grep { $archivelist[$_] =~ /collectedVariants/ } 0..$#archivelist;
-        splice( @archivelist, $index, 1 );
-
-		#&halt;	
+        remove_file( "collectedVariants", \@archivelist );
 	} 
 	elsif ( ! -e "plugin_out/variantCaller_out" ) {
 		print $msg timestamp('timestamp') . " ERROR: TVC results directory is missing.  Did you run TVC?\n";
 		halt();
 	}
-	elsif ( ! -e glob("plugin_out/AmpliconCoveragePlots*") ) {
-		print $msg timestamp('timestamp') . " ERROR: AmpliconCoveragePlots plugin is missing. Did you run the plugin?\n"; 
-		halt();
+	elsif ( ! -e "plugin_out/AmpliconCoveragePlots_out" ) {
+		print $msg timestamp('timestamp') . " INFO: AmpliconCoveragePlots directory is not present. Skipping.\n";
+        remove_file( "plugin_out/AmpliconCoveragePlots", \@archivelist );
     }
-	elsif ( ! -e glob("plugin_out/varCollector*") ) {
-		print $msg timestamp('timestamp') . " INFO: No varCollector plugin data.  Run may be prior to plugin implementation.  Skipping.\n";
-        my $index = grep { $archivelist[$_] =~ /varCollector/ } 0..$#archivelist;
-        splice( @archivelist, $index, 1 );
-        
-	} else {
+	elsif ( ! -e "plugin_out/varCollector_out" ) {
+		#print $msg timestamp('timestamp') . " INFO: No varCollector plugin data.  Run may be prior to plugin implementation.  Skipping.\n";
+        #remove_file( "plugin_out/varCollector", \@archivelist );
+		print $msg timestamp('timestamp') . " ERROR: No varCollector plugin data.  Did you run varCollector?\n";
+        halt();
+    }
+	elsif ( ! -e "plugin_out/AmpliconCoverageAnalysis" ) {
+		print $msg timestamp('timestamp') . " WARN: AmpliconCoverageAnalysis is missing. Data may be prior to implementation.\n";
+        remove_file( "plugin_out/AmpliconCoverageAnalysis_out", \@archivelist );
+    }
+    elsif ( ! -e glob("basecaller_results/datasets*") ) {
+        print $msg timestamp('timestamp') . "INFO: No 'datasets_basecaller.json' or 'datasets_pipeline.json' files found.  Data may be prior to TSv4.0 implementation.\n";
+        remove_file( "basecaller_results/datasets_basecaller.json", \@archivelist );
+        remove_file( "basecaller_results/datasets_pipeline.json", \@archivelist );
+	} 
+    else {
 		print $msg timestamp('timestamp') . " All data located.  Proceeding with archive creation\n"; 
 	}
+
+    #dd \@archivelist;
+    #exit;
 
 	# Run the archive subs
 	if ( archive_data( \@archivelist, $archive_name ) == 1 ) {
@@ -301,6 +315,19 @@ if ( $purpose == 2 ) {
 	}
 }
 
+sub remove_file {
+    # remove file from extract or archive list; called too many times to not have subroutine!
+    my $file = shift;
+    my $filelist = shift;
+
+    print $msg timestamp('timestamp') . " Removing file '$file' from archive list\n";
+
+    my $index = grep { $archivelist[$_] =~ /$file/ } 0..$#archivelist;
+    splice( @archivelist, $index, 1 );
+
+    return;
+}
+
 sub copy_data {
 	my ( $file, $location ) = @_;
 	print "Copying file '$file' to '$location'...\n";
@@ -311,9 +338,16 @@ sub archive_data {
 	my $filelist = shift;
 	my $archivename = shift;
 	my $cwd = getcwd;
-	#my $path = "/media/Aperio/";
 	my $path;
     ($outdir) ? ($path = $destination_dir) : ($path = '/media/Aperio/');
+
+    # TODO:
+    # Create a archive subdirectory to put all data in.
+    #if ( create_archive_dir( \$case_num, \$destination_dir ) != 0 ) {
+        #print $mgs timestamp('timestamp') . "ERROR: Unable to create an archive subdirectory in '$destination_dir'!\n";
+        #halt();
+    #}
+
     
 	# Create a checksum file for all of the files in the archive and add it to the tarball 
 	print $msg timestamp('timestamp') . " Creating an md5sum list for all archive files.\n";
@@ -327,7 +361,6 @@ sub archive_data {
 	print $msg timestamp('timestamp') . " Creating a tarball archive of $archivename.\n";
 
 	# Use two step tar process with 'pigz' multicore gzip utility to speed things up a bit. 
-	# if pigz is not installed on the system.
 	if ( system( "tar -cf - @$filelist | pigz -9 -p 8 > $archivename" ) != 0 ) {
 		print $msg timestamp('timestamp') . " Tarball creation failed: $?.\n"; 
 		return 0;	
@@ -494,3 +527,13 @@ sub md5sum {
 		return 0;
 	}
 }
+
+#sub create_archive_dir {
+    # Create an archive directory with a case name for pooling all clinical data together
+
+    #my $archive_name = shift;
+    #my $path = shift;
+
+    #if ( ! -e $path
+    
+#}
