@@ -10,9 +10,6 @@
 # the copied archive is compared to the original to make sure it did not get corrupted during the transfer
 # and if successful the local copy is deleted.
 #
-# TODO:  
-#     - Add mount sub for Aperio cifs drive
-#
 # 4/12/13 - D Sims
 #
 ############################################################################################################
@@ -29,7 +26,7 @@ use Digest::MD5;
 use File::Path qw{ remove_tree };
 use Data::Dump;
 
-my $debug = 1;
+my $debug = 0;
 
 my $scriptname = basename($0);
 my $version = "v1.8.053014";
@@ -135,8 +132,9 @@ if ( ! -e $destination_dir ) {
 }
 
 # Create logfile for archive process
-#my $logfile = "/var/log/mocha/archive.log";
-my $logfile = "/home/ionadmin/testing.log";
+my $logfile = "/var/log/mocha/archive.log";
+# XXX
+#my $logfile = "/home/ionadmin/testing.log";
 open( my $log_fh, ">>", $logfile ) || die "Can't open the logfile '$logfile' for writing\n";
 
 # Direct script messages to either a logfile or both STDOUT and a logfile
@@ -257,6 +255,7 @@ if ( $purpose == 1 ) {
 # XXX
 # Run full archive on data.
 if ( $purpose == 2 ) {
+
 	chdir( $resultsDir ) || die "Can not access the results directory selected: $resultsDir. $!";
 	my $archive_name = "$output.tar.gz";
 	print $msg timestamp('timestamp') . " $username has started archive on '$output'.\n";
@@ -340,6 +339,9 @@ sub archive_data {
 	my $cwd = getcwd;
 	my $path;
     ($outdir) ? ($path = $destination_dir) : ($path = '/media/Aperio/');
+
+    # Check the fileshare before we start
+    mount_check(\$path);
 
     # TODO:
     # Create a archive subdirectory to put all data in.
@@ -468,18 +470,17 @@ sub halt {
 }
 
 sub mount_check {
-	# Double check that the CIFS filesystem is mounted before we begin, and if not, mount it
-	
-	my $mount_point = shift;
-	open ( my $mount_fh, "<", $$mount_point ) || die "Can't open '/proc/mounts' for reading: $!";
+	# Double check that the destination filesystem is mounted before we begin. 
 
-	if ( ! grep { $_ =~ /\/media\/Aperio cifs.*/ } <$mount_fh> ) {
-		print $msg timestamp('timestamp') . " The CIFS fileshare is not mounted!\n";
-		print $msg timestamp('timestamp') . " Mounting the Aperio CIFS fileshare\n";
-		
-		# TODO: add mount commands here.
+	my $mount_point = shift;
+    $$mount_point =~ s/\/$//; # Get rid of terminal forward slash to match mount info
+
+    open ( my $mount_fh, "<", '/proc/mounts' ) || die "Can't open '/proc/mounts' for reading: $!";
+    if ( ! grep { $_ =~ /$$mount_point/ } <$mount_fh> ) {
+		print $msg timestamp('timestamp') . " ERROR: The remote fileshare is not mounted!\n";
+        halt();
 	} else {
-		print $msg timestamp('timestamp') . " Looks like the CIFS fileshare is mounted and accessible.\n";
+		print $msg timestamp('timestamp') . " The remote fileshare is mounted and accessible.\n";
 	}
 }
 
@@ -491,10 +492,8 @@ sub process_md5_files {
 	# Since symlinks can cause downstrem problems is the dir structure changes, skip adding these to the md5sum check
 	foreach my $file ( @$filelist ) {
 		if ( -l $file ) {
-			#print "DEBUG: file '$file' is a sym link.  Skipping...\n" if $debug == 1;
 			next;
 		}
-		#print "Processing '$file'...\n";
 		if ( -d $file ) {
 			opendir( DIR, $file ) || die "Can't open the dir '$file': $!";
 			my @dirlist = sort( grep { !/^\.|\.\.}$/ } readdir( DIR ) );
