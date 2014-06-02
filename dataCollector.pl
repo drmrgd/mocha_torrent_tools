@@ -21,6 +21,7 @@ use File::Basename;
 use IO::Tee;
 use POSIX qw{ strftime };
 use Text::Wrap;
+use Term::ANSIColor;
 use Cwd;
 use Digest::MD5;
 use File::Path qw{ remove_tree };
@@ -51,6 +52,7 @@ my $usage = <<"EOT";
 USAGE: $scriptname [options] [-a | -e] <results dir>
     -a, --archive    Create tarball archive of the run data
     -e, --extract    Extract the data for re-analysis on another computer.
+    -c, --case       Case number to use for new directory generation
     -o, --output     Custom output file name.  (DEFAULT: 'run_name.mmddyyy')
     -d, --dir        Custom output / destination  directory (DEFAULT: /results/xfer/)
     -q, --quiet      Run quietly without sending messages to STDOUT
@@ -64,8 +66,8 @@ my $archive;
 my $extract;
 my $output;
 my $quiet = 0;
-my $outdir='';
-my $case_num;
+my $outdir = '';
+my $case_num = '';
 
 GetOptions( "help"      => \$help,
             "version"   => \$verInfo,
@@ -73,8 +75,8 @@ GetOptions( "help"      => \$help,
             "extract"   => \$extract,
             "archive"   => \$archive,
             "output"    => \$output,
-            "dir"       => \$outdir,
-            "case"      => \$case_num,
+            "dir=s"     => \$outdir,
+            "case=i"    => \$case_num,
         ) or do { print "\n$usage\n"; exit 1; };
 
 sub help {
@@ -143,6 +145,14 @@ if ( $quiet == 1 ) {
 # Format the logfile output
 $Text::Wrap::columns = 123;
 my $space = ' ' x ( length( timestamp('timestamp') ) + 3 );
+my $warn = colored("WARN:", 'bold yellow on_black');
+my $info = colored("INFO:", 'bold green on_black');
+my $err = colored("ERROR:", 'bold red on_black');
+
+#print timestamp('timestamp') . " $warn This is a warning!\n";
+#print timestamp('timestamp') . " $info This is info.\n";
+#print timestamp('timestamp') . " $err This is an error\n";
+#exit;
 
 ##----------------------------------------- End Command Arg Parsing ------------------------------------##
 
@@ -191,15 +201,15 @@ if ( $extract ) {
 
         if ( $major_version == 3 ) {
             eval {
-                print "Using TSv3.2.1 sampleKeyGen scripts.\n";
+                print "$info Using TSv3.2.1 sampleKeyGen scripts.\n";
                 system( "sampleKeyGen32 -o $resultsDir/sampleKey.txt /opt/mocha-tools/varCollector/resources/bcIndex.txt ${resultsDir}ion_params_00.json" );
             };
         } else {
-            print "Using TSv4.0.2 sampleKeyGen scripts.\n";
+            print "$info Using TSv4.0.2 sampleKeyGen scripts.\n";
             eval { system( "sampleKeyGen -o $resultsDir/sampleKey.txt" );
             };
         }
-		print "ERROR: SampleKeyGen Script encountered errors: $@" if $@;
+		print "$err SampleKeyGen Script encountered errors: $@" if $@;
 		push( @exportFileList, "$resultsDir/sampleKey.txt" );
 		
 	}
@@ -234,7 +244,7 @@ if ( $extract ) {
     print "Creating a tarball of $output for export...\n";
 
     if ( system( "tar -cf - $output | pigz -9 -p 8 > '${output}.tar.gz'" ) != 0 ) {
-        print "ERROR: Tarball creation of '$output' failed.\n";
+        print "$err Tarball creation of '$output' failed.\n";
         printf "chile died with signal %d, %s coredump\n", 
             ($? & 127), ($? & 128) ? 'with' : 'without';
         exit $?;
@@ -246,7 +256,6 @@ if ( $extract ) {
 	print "Finished copying data package for export.  Data ready in '$destination_dir'\n";
 }
 
-# XXX
 # Run full archive on data.
 if ( $archive ) {
 
@@ -264,27 +273,27 @@ if ( $archive ) {
 
 	# Add check to be sure that all of the results dirs and logs are there. Exit otherwise so we don't miss anything
 	if ( ! -e "collectedVariants" ) {
-		print $msg timestamp('timestamp') . " INFO: collectedVariants directory is not present. Skipping.\n";
+		print $msg timestamp('timestamp') . " $info CollectedVariants directory is not present. Skipping.\n";
         remove_file( "collectedVariants", \@archivelist );
 	} 
 	elsif ( ! -e "plugin_out/variantCaller_out" ) {
-		print $msg timestamp('timestamp') . " ERROR: TVC results directory is missing.  Did you run TVC?\n";
+		print $msg timestamp('timestamp') . " $err TVC results directory is missing.  Did you run TVC?\n";
 		halt();
 	}
 	elsif ( ! -e "plugin_out/AmpliconCoveragePlots_out" ) {
-		print $msg timestamp('timestamp') . " INFO: AmpliconCoveragePlots directory is not present. Skipping.\n";
+		print $msg timestamp('timestamp') . " $info AmpliconCoveragePlots directory is not present. Skipping.\n";
         remove_file( "plugin_out/AmpliconCoveragePlots", \@archivelist );
     }
 	elsif ( ! -e "plugin_out/varCollector_out" ) {
-		print $msg timestamp('timestamp') . " ERROR: No varCollector plugin data.  Did you run varCollector?\n";
+		print $msg timestamp('timestamp') . " $err No varCollector plugin data.  Did you run varCollector?\n";
         halt();
     }
 	elsif ( ! -e "plugin_out/AmpliconCoverageAnalysis" ) {
-		print $msg timestamp('timestamp') . " WARN: AmpliconCoverageAnalysis is missing. Data may be prior to implementation.\n";
+		print $msg timestamp('timestamp') . " $warn AmpliconCoverageAnalysis is missing. Data may be prior to implementation.\n";
         remove_file( "plugin_out/AmpliconCoverageAnalysis_out", \@archivelist );
     }
     elsif ( ! -e glob("basecaller_results/datasets*") ) {
-        print $msg timestamp('timestamp') . "INFO: No 'datasets_basecaller.json' or 'datasets_pipeline.json' files found.  Data may be prior to TSv4.0 implementation.\n";
+        print $msg timestamp('timestamp') . " $info No 'datasets_basecaller.json' or 'datasets_pipeline.json' files found.  Data may be prior to TSv4.0 implementation.\n";
         remove_file( "basecaller_results/datasets_basecaller.json", \@archivelist );
         remove_file( "basecaller_results/datasets_pipeline.json", \@archivelist );
 	} 
@@ -300,8 +309,8 @@ if ( $archive ) {
 		print $msg timestamp('timestamp') . " Archival of experiment '$output' completed successfully\n\n";
 		print "Experiment archive completed successfully\n" if $quiet == 1;
 	} else {
-		print $msg timestamp('timestamp') . " Archive creation failed for '$output'.  Check the logfiles for details\n\n";
-		print "Archive creation failed for '$output'. Check /var/log/mocha/archive.log for details\n\n" if $quiet == 1;
+		print $msg timestamp('timestamp') . " $err Archive creation failed for '$output'.  Check the logfiles for details\n\n";
+		print "$err Archive creation failed for '$output'. Check /var/log/mocha/archive.log for details\n\n" if $quiet == 1;
 		halt();
 	}
 }
@@ -335,11 +344,11 @@ sub archive_data {
     # Check the fileshare before we start
     mount_check(\$path);
 
-    print "exiting before we make the new sub dir; line: 338\n";
-    exit;
-
     # TODO:
+    # XXX
     # Create a archive subdirectory to put all data in.
+    create_archive_dir( \$case_num, \$destination_dir );
+    exit;
     #if ( create_archive_dir( \$case_num, \$destination_dir ) != 0 ) {
         #print $mgs timestamp('timestamp') . "ERROR: Unable to create an archive subdirectory in '$destination_dir'!\n";
         #halt();
@@ -359,7 +368,7 @@ sub archive_data {
 
 	# Use two step tar process with 'pigz' multicore gzip utility to speed things up a bit. 
 	if ( system( "tar -cf - @$filelist | pigz -9 -p 8 > $archivename" ) != 0 ) {
-		print $msg timestamp('timestamp') . " Tarball creation failed: $?.\n"; 
+		print $msg timestamp('timestamp') . " $err Tarball creation failed: $?.\n"; 
 		return 0;	
 	} else {
 		print $msg timestamp('timestamp') . " Tarball creation was successful.\n";
@@ -368,7 +377,7 @@ sub archive_data {
 	# Uncompress archive in /tmp dir and check to see that md5sum matches.
 	my $tmpdir = "/tmp/mocha_archive";
 	if ( -d $tmpdir ) {
-		print $msg timestamp('timestamp') . " WARNING: found mocha_tmp directory already.  Cleaning up to make way for new one\n";
+		print $msg timestamp('timestamp') . " $warn found mocha_tmp directory already.  Cleaning up to make way for new one\n";
 		remove_tree( $tmpdir );
 	} 
 	
@@ -376,7 +385,7 @@ sub archive_data {
 	
 	print $msg timestamp('timestamp') . " Uncompressing tarball in '$tmpdir' for integrity check.\n";
 	if ( system( "tar xfz $archivename -C $tmpdir" ) != 0 ) {
-		print $msg timestamp('timestamp') . " Can not copy tarball to '/tmp'. $?\n";
+		print $msg timestamp('timestamp') . " $warn Can not copy tarball to '/tmp'. $?\n";
 		return 0;
 	}
 	
@@ -391,12 +400,12 @@ sub archive_data {
 		remove_tree( $tmpdir );
 	} 
 	elsif ( $? == 1 ) {
-		print $msg timestamp('timestamp') . " There was a problem with the archive integrity.  Archive creation halted.\n";
+		print $msg timestamp('timestamp') . " $err There was a problem with the archive integrity.  Archive creation halted.\n";
 		chdir( $cwd ) || die "Can't change dir back to '$cwd': $!";
 		remove_tree( $tmpdir );
 		return 0;
 	} else {
-		print $msg timestamp('timestamp') . " An error with the md5sum check was encountered: $?\n";
+		print $msg timestamp('timestamp') . " $err An error with the md5sum check was encountered: $?\n";
 		chdir( $cwd ) || die "Can't change dir back to '$cwd': $!";
 		remove_tree( $tmpdir );
 		return 0;
@@ -435,10 +444,10 @@ sub archive_data {
 
 	print $msg timestamp('timestamp') . " Comparing the MD5 hash value for local and fileshare copies of archive.\n";
 	if ( $init_tarball_md5 ne $post_tarball_md5 ) {
-		print $msg timestamp('timestamp') . " The md5sum for the archive does not agree after moving to the storage location. Retry the transfer manually\n";
+		print $msg timestamp('timestamp') . " $err The md5sum for the archive does not agree after moving to the storage location. Retry the transfer manually\n";
 		return 0;
 	} else {
-		print $msg timestamp('timestamp') . " The md5sum for the archive is in agreement. The local copy will now be deleted.\n";
+		print $msg timestamp('timestamp') . " $info The md5sum for the archive is in agreement. The local copy will now be deleted.\n";
 		unlink( $archivename );
 	}
 
@@ -460,7 +469,7 @@ sub timestamp {
 }
 
 sub halt {
-	print $msg timestamp('timestamp') . " The archive script encountered errors and was unable to complete successfully\n\n";
+	print $msg timestamp('timestamp') . " $err The archive script encountered errors and was unable to complete successfully\n\n";
 	exit 1;
 }
 
@@ -472,7 +481,7 @@ sub mount_check {
 
     open ( my $mount_fh, "<", '/proc/mounts' ) || die "Can't open '/proc/mounts' for reading: $!";
     if ( ! grep { $_ =~ /$$mount_point/ } <$mount_fh> ) {
-		print $msg timestamp('timestamp') . " ERROR: The remote fileshare is not mounted!\n";
+		print $msg timestamp('timestamp') . " $err The remote fileshare is not mounted! You must mount this share before proceeding\n";
         halt();
 	} else {
 		print $msg timestamp('timestamp') . " The remote fileshare is mounted and accessible.\n";
@@ -522,12 +531,18 @@ sub md5sum {
 	}
 }
 
-#sub create_archive_dir {
-    # Create an archive directory with a case name for pooling all clinical data together
-
-    #my $archive_name = shift;
-    #my $path = shift;
-
-    #if ( ! -e $path
+sub create_archive_dir {
+    #Create an archive directory with a case name for pooling all clinical data together
     
-#}
+    my $case = shift;
+    my $path = shift;
+
+    print "\n==============  DEBUG  ===============\n";
+    print "\tCase No: $$case\n";
+    print "\tPath: $$path\n";
+    print "======================================\n\n";
+
+    print $msg timestamp('timestamp') . " $info No case number assigned for this archive.\n" unless $$case
+   ; #if ( ! -e $path
+    
+}
