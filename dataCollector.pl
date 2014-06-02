@@ -54,7 +54,7 @@ USAGE: $scriptname [options] [-a | -e] <results dir>
     -e, --extract    Extract the data for re-analysis on another computer.
     -c, --case       Case number to use for new directory generation
     -o, --output     Custom output file name.  (DEFAULT: 'run_name.mmddyyy')
-    -d, --dir        Custom output / destination  directory (DEFAULT: /results/xfer/)
+    -d, --dir        Custom output / destination  directory (DEFAULT: /results/xfer/ for extract and /media/Aperio for archive)
     -q, --quiet      Run quietly without sending messages to STDOUT
     -v, --version    Version Information
     -h, --help       Display the help information
@@ -76,7 +76,7 @@ GetOptions( "help"      => \$help,
             "archive"   => \$archive,
             "output"    => \$output,
             "dir=s"     => \$outdir,
-            "case=i"    => \$case_num,
+            "case=s"    => \$case_num,
         ) or do { print "\n$usage\n"; exit 1; };
 
 sub help {
@@ -129,7 +129,6 @@ if ( ! -e $destination_dir ) {
 
 # Create logfile for archive process
 my $logfile = "/var/log/mocha/archive.log";
-# XXX
 #my $logfile = "/home/ionadmin/testing.log";
 open( my $log_fh, ">>", $logfile ) || die "Can't open the logfile '$logfile' for writing\n";
 
@@ -148,11 +147,6 @@ my $space = ' ' x ( length( timestamp('timestamp') ) + 3 );
 my $warn = colored("WARN:", 'bold yellow on_black');
 my $info = colored("INFO:", 'bold green on_black');
 my $err = colored("ERROR:", 'bold red on_black');
-
-#print timestamp('timestamp') . " $warn This is a warning!\n";
-#print timestamp('timestamp') . " $info This is info.\n";
-#print timestamp('timestamp') . " $err This is an error\n";
-#exit;
 
 ##----------------------------------------- End Command Arg Parsing ------------------------------------##
 
@@ -213,7 +207,7 @@ if ( $extract ) {
 		push( @exportFileList, "$resultsDir/sampleKey.txt" );
 		
 	}
-		if ($debug == 1) {
+		if ( $debug ) {
 			print "DEBUG: contents of 'exportFileList':\n";
 			print "\t$_\n" for @exportFileList;
 		}
@@ -245,7 +239,7 @@ if ( $extract ) {
 
     if ( system( "tar -cf - $output | pigz -9 -p 8 > '${output}.tar.gz'" ) != 0 ) {
         print "$err Tarball creation of '$output' failed.\n";
-        printf "chile died with signal %d, %s coredump\n", 
+        printf "child died with signal %d, %s coredump\n", 
             ($? & 127), ($? & 128) ? 'with' : 'without';
         exit $?;
     } else {
@@ -344,21 +338,14 @@ sub archive_data {
     # Check the fileshare before we start
     mount_check(\$path);
 
-    # TODO:
     # XXX
     # Create a archive subdirectory to put all data in.
-    create_archive_dir( \$case_num, \$destination_dir );
-    exit;
-    #if ( create_archive_dir( \$case_num, \$destination_dir ) != 0 ) {
-        #print $mgs timestamp('timestamp') . "ERROR: Unable to create an archive subdirectory in '$destination_dir'!\n";
-        #halt();
-    #}
-
+    my $archive_dir = create_archive_dir( \$case_num, \$path );
     
 	# Create a checksum file for all of the files in the archive and add it to the tarball 
 	print $msg timestamp('timestamp') . " Creating an md5sum list for all archive files.\n";
 	if ( -e 'md5sum.txt' ) {
-		print $msg timestamp('timestamp') . " md5sum.txt file already exists in this directory.  Deleting and creating fresh list.\n";
+		print $msg timestamp('timestamp') . " $info md5sum.txt file already exists in this directory.  Deleting and creating fresh list.\n";
 		unlink( 'md5sum.txt' );
 	}
 	process_md5_files( $filelist );
@@ -371,7 +358,7 @@ sub archive_data {
 		print $msg timestamp('timestamp') . " $err Tarball creation failed: $?.\n"; 
 		return 0;	
 	} else {
-		print $msg timestamp('timestamp') . " Tarball creation was successful.\n";
+		print $msg timestamp('timestamp') . " $info Tarball creation was successful.\n";
 	}
 
 	# Uncompress archive in /tmp dir and check to see that md5sum matches.
@@ -417,30 +404,36 @@ sub archive_data {
 	binmode( $pre_fh );
 	my $init_tarball_md5 = Digest::MD5->new->addfile($pre_fh)->hexdigest;
 	close( $pre_fh );
-	print "DEBUG: MD5 Hash = " . $init_tarball_md5 . "\n" if $debug == 1;
+	print "DEBUG: MD5 Hash = " . $init_tarball_md5 . "\n" if $debug;
 
-	print $msg timestamp('timestamp') . " Copying archive tarball to '$path'.\n"; 
+	print $msg timestamp('timestamp') . " Copying archive tarball to '$archive_dir'.\n"; 
 	
-	print "DEBUG: pwd => $cwd\n" if $debug == 1;
-	print "DEBUG: path => $path\n" if $debug == 1;
-	
-	if ( copy( $archivename, $path ) == 0 ) {
+    if ( $debug ) {
+        print "\n==============  DEBUG  ===============\n";
+        print "\tpwd: $cwd\n";
+        print "\tpath: $archive_dir\n";
+        print "======================================\n\n";
+    }
+
+	#if ( copy( $archivename, $path ) == 0 ) {
+	if ( copy( $archivename, $archive_dir ) == 0 ) {
 		print $msg timestamp('timestamp') . " Copying archive to storage device: $!.\n"; 
 		return 0;
 	} else {
-		print $msg timestamp('timestamp') . " Archive successfully copied to archive storage device.\n";
+		print $msg timestamp('timestamp') . " $info Archive successfully copied to archive storage device.\n";
 	}
 
 	# check integrity of the tarball
 	print $msg timestamp('timestamp') . " Calculating MD5 hash for copied archive.\n";
-    my $moved_archive = "$path/$archivename";
+    #my $moved_archive = "$path/$archivename";
+    my $moved_archive = "$archive_dir/$archivename";
 
 	open( my $post_fh, "<", $moved_archive ) || die "Can't open the archive tarball for reading: $!";
 	binmode( $post_fh );
 	my $post_tarball_md5 = Digest::MD5->new->addfile($post_fh)->hexdigest;
 	close( $post_fh );
 	
-	print "DEBUG: MD5 Hash = " . $post_tarball_md5 . "\n" if $debug == 1;
+	print "DEBUG: MD5 Hash = " . $post_tarball_md5 . "\n" if $debug;
 
 	print $msg timestamp('timestamp') . " Comparing the MD5 hash value for local and fileshare copies of archive.\n";
 	if ( $init_tarball_md5 ne $post_tarball_md5 ) {
@@ -480,8 +473,8 @@ sub mount_check {
     $$mount_point =~ s/\/$//; # Get rid of terminal forward slash to match mount info
 
     open ( my $mount_fh, "<", '/proc/mounts' ) || die "Can't open '/proc/mounts' for reading: $!";
-    if ( ! grep { $_ =~ /$$mount_point/ } <$mount_fh> ) {
-		print $msg timestamp('timestamp') . " $err The remote fileshare is not mounted! You must mount this share before proceeding\n";
+    if ( ! (grep { $_ =~ /$$mount_point/ } <$mount_fh>) && ! -e $$mount_point ) {
+		print $msg timestamp('timestamp') . " $err The remote fileshare or destination dir is not mounted! You must mount this share before proceeding\n";
         halt();
 	} else {
 		print $msg timestamp('timestamp') . " The remote fileshare is mounted and accessible.\n";
@@ -537,12 +530,24 @@ sub create_archive_dir {
     my $case = shift;
     my $path = shift;
 
-    print "\n==============  DEBUG  ===============\n";
-    print "\tCase No: $$case\n";
-    print "\tPath: $$path\n";
-    print "======================================\n\n";
+    if ( $debug ) {
+        print "\n==============  DEBUG  ===============\n";
+        print "\tCase No: $$case\n";
+        print "\tPath: $$path\n";
+        print "======================================\n\n";
+    }
 
-    print $msg timestamp('timestamp') . " $info No case number assigned for this archive.\n" unless $$case
-   ; #if ( ! -e $path
-    
+    print $msg timestamp('timestamp') . " $info No case number assigned for this archive.\n" unless $$case; 
+    print $msg timestamp('timestamp') . " $err The path '$$path' does not exist.  Can not continue!\n" unless ( -e $$path );
+
+    my $archive_dir = "$$path/$$case";
+
+    if ( -e $archive_dir ) {
+        print $msg timestamp('timestamp') . " $err Directory '$archive_dir' already exists. Stopping.\n";
+        exit 1;
+    }
+    print $msg timestamp('timestamp') . " Creating subdirectory '$archive_dir' to put archive into...\n";
+    mkdir( "$archive_dir" ) || die "$err Can not create an archive directory in '$$path'";
+
+    return $archive_dir;
 }
