@@ -24,12 +24,13 @@ use Text::Wrap;
 use Cwd;
 use Digest::MD5;
 use File::Path qw{ remove_tree };
+use Getopt::Long;
 use Data::Dump;
 
 my $debug = 0;
 
 my $scriptname = basename($0);
-my $version = "v1.8.053014";
+my $version = "v1.9.060214";
 my $description = <<"EOT";
 Program to grab data from an Ion Torrent Run and either archive it, or create a directory that can be imported 
 to another analysis computer for processing.  
@@ -57,6 +58,25 @@ USAGE: $scriptname [options] [-a | -e] <results dir>
     -h, --help       Display the help information
 EOT
 
+my $verInfo = 0;
+my $help = 0;
+my $archive;
+my $extract;
+my $output;
+my $quiet = 0;
+my $outdir='';
+my $case_num;
+
+GetOptions( "help"      => \$help,
+            "version"   => \$verInfo,
+            "quiet"     => \$quiet,
+            "extract"   => \$extract,
+            "archive"   => \$archive,
+            "output"    => \$output,
+            "dir"       => \$outdir,
+            "case"      => \$case_num,
+        ) or do { print "\n$usage\n"; exit 1; };
+
 sub help {
 	printf "%s - %s\n%s\n\n%s\n", $scriptname, $version, $description, $usage;
 	exit;
@@ -67,36 +87,12 @@ sub version_info {
 	exit;
 }
 
-my $verInfo = 0;
-my $help = 0;
-my $purpose;
-my $output;
-my $quiet = 0;
-my $outdir='';
-
-while ( scalar( @ARGV ) > 0 ) {
-	last if ( $ARGV[0] !~ /^-/ );
-	my $opt = shift;
-	if    ( $opt eq '-h' || $opt eq '--help' )     { $help = 1; } 
-	elsif ( $opt eq '-v' || $opt eq '--version' )  { $verInfo = 1; }
-	elsif ( $opt eq '-q' || $opt eq '--quiet' )    { $quiet = 1; }
-	elsif ( $opt eq '-e' || $opt eq '--extract' )  { $purpose = 1; }
-	elsif ( $opt eq '-a' || $opt eq '--archive' )  { $purpose = 2; }
-	elsif ( $opt eq '-o' || $opt eq '--output' )   { $output = shift; }
-    elsif ( $opt eq '-d' || $opt eq '--dir' )      { $outdir = shift; }
-	else {
-		print "$scriptname: Invalid option: $opt\n\n";
-		print "$usage\n";
-		exit 1;
-	}
-}
-
 help if $help;
 version_info if $verInfo;
 
 my $username = $ENV{'USER'};
 
-if ( ! defined $purpose or $purpose != 1 && $purpose != 2 ) {
+if ( ! defined $archive && ! defined $extract ) {
 	print "ERROR: You must choose archive (-a) or extract (-e) options when running this script\n\n";
 	print "$usage\n";
 	exit 1;
@@ -118,11 +114,9 @@ open( my $explog_fh, "<", "$resultsDir/explog.txt" ) || die "Can't open the expl
 (my $ts_version) = map { /PGM SW Release:\s+(\d\.\d\.\d)$/ } <$explog_fh>;
 
 # Setup custom and default output names
-#my ( $run_name ) = $resultsDir =~ /Auto_user_([PM]CC-\d+.*_\d+)\/?$/;
 my ( $run_name ) = $resultsDir =~ /Auto_user_((?:[PM]CC|MC[12])-\d+.*_\d+)\/?$/;
 $output = "$run_name." . timestamp('date') if ( ! defined $output );
 
-#my $destination_dir = '/results/xfer' ;
 my $destination_dir;
 ( $outdir ) ? ($destination_dir = $outdir) : ($destination_dir = '/results/xfer');
 
@@ -179,7 +173,7 @@ my @archivelist = qw{
 };
 
 # Just run the export subroutine for pushing data to a different server
-if ( $purpose == 1 ) {
+if ( $extract ) {
 	print "Creating a copy of data in '$destination_dir from '$resultsDir' for export...\n";
 	system( "mkdir -p $destination_dir/$output/sigproc_results/" );
 	my $sigproc_out = "$destination_dir/$output/sigproc_results/";
@@ -254,7 +248,7 @@ if ( $purpose == 1 ) {
 
 # XXX
 # Run full archive on data.
-if ( $purpose == 2 ) {
+if ( $archive ) {
 
 	chdir( $resultsDir ) || die "Can not access the results directory selected: $resultsDir. $!";
 	my $archive_name = "$output.tar.gz";
@@ -282,8 +276,6 @@ if ( $purpose == 2 ) {
         remove_file( "plugin_out/AmpliconCoveragePlots", \@archivelist );
     }
 	elsif ( ! -e "plugin_out/varCollector_out" ) {
-		#print $msg timestamp('timestamp') . " INFO: No varCollector plugin data.  Run may be prior to plugin implementation.  Skipping.\n";
-        #remove_file( "plugin_out/varCollector", \@archivelist );
 		print $msg timestamp('timestamp') . " ERROR: No varCollector plugin data.  Did you run varCollector?\n";
         halt();
     }
@@ -342,6 +334,9 @@ sub archive_data {
 
     # Check the fileshare before we start
     mount_check(\$path);
+
+    print "exiting before we make the new sub dir; line: 338\n";
+    exit;
 
     # TODO:
     # Create a archive subdirectory to put all data in.
