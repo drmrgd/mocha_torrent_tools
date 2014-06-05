@@ -116,7 +116,7 @@ open( my $explog_fh, "<", "$resultsDir/explog.txt" ) || die "Can't open the expl
 (my $ts_version) = map { /PGM SW Release:\s+(\d\.\d\.\d)$/ } <$explog_fh>;
 
 # Setup custom and default output names
-my ( $run_name ) = $resultsDir =~ /Auto_user_((?:[PM]CC|MC[12])-\d+.*_\d+)\/?$/;
+my ( $run_name ) = $resultsDir =~ /Auto(?:_user)?_((?:[PM]CC|MC[12])-\d+.*_\d+)\/?$/;
 $output = "$run_name." . timestamp('date') if ( ! defined $output );
 
 my $destination_dir;
@@ -340,7 +340,12 @@ sub archive_data {
 
     # XXX
     # Create a archive subdirectory to put all data in.
-    my $archive_dir = create_archive_dir( \$case_num, \$path );
+    my $archive_dir;
+    if ( $case_num ) {
+        $archive_dir = create_archive_dir( \$case_num, \$path );
+    } else {
+        $archive_dir = $path;
+    }
     
 	# Create a checksum file for all of the files in the archive and add it to the tarball 
 	print $msg timestamp('timestamp') . " Creating an md5sum list for all archive files.\n";
