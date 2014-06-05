@@ -583,14 +583,8 @@ sub send_mail {
     my @additional_recipients = qw( 
         harringtonrd@mail.nih.gov
         vivekananda.datta@nih.gov
-
+        patricia.runge@nih.gov
         );
-        #patricia.runge@nih.gov
-    #my @additional_recipients = qw( 
-        #dave@lamneth.net
-        #harringtonrd@mail.nih.gov
-        #misc@lamneth.net
-        #);
 
     if ( $debug ) {
         print "============  DEBUG  ============\n";
