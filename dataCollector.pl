@@ -31,7 +31,7 @@ use Data::Dump;
 my $debug = 0;
 
 my $scriptname = basename($0);
-my $version = "v1.9.060214";
+my $version = "v2.0.060514";
 my $description = <<"EOT";
 Program to grab data from an Ion Torrent Run and either archive it, or create a directory that can be imported 
 to another analysis computer for processing.  
@@ -253,6 +253,10 @@ if ( $extract ) {
 # Run full archive on data.
 if ( $archive ) {
 
+    # XXX
+    #send_mail("failure", \$case_num, \$resultsDir );
+    #exit;
+
 	chdir( $resultsDir ) || die "Can not access the results directory selected: $resultsDir. $!";
 	my $archive_name = "$output.tar.gz";
 	print $msg timestamp('timestamp') . " $username has started archive on '$output'.\n";
@@ -270,30 +274,29 @@ if ( $archive ) {
 		print $msg timestamp('timestamp') . " $info CollectedVariants directory is not present. Skipping.\n";
         remove_file( "collectedVariants", \@archivelist );
 	} 
-	elsif ( ! -e "plugin_out/variantCaller_out" ) {
+	if ( ! -e "plugin_out/variantCaller_out" ) {
 		print $msg timestamp('timestamp') . " $err TVC results directory is missing.  Did you run TVC?\n";
-		halt();
+		halt(\$resultsDir);
 	}
-	elsif ( ! -e "plugin_out/AmpliconCoveragePlots_out" ) {
-		print $msg timestamp('timestamp') . " $info AmpliconCoveragePlots directory is not present. Skipping.\n";
+	if ( ! -e "plugin_out/AmpliconCoveragePlots_out" ) {
+		print $msg timestamp('timestamp') . " $warn AmpliconCoveragePlots directory is not present. Skipping.\n";
         remove_file( "plugin_out/AmpliconCoveragePlots", \@archivelist );
     }
-	elsif ( ! -e "plugin_out/varCollector_out" ) {
+	if ( ! -e "plugin_out/varCollector_out" ) {
 		print $msg timestamp('timestamp') . " $err No varCollector plugin data.  Did you run varCollector?\n";
-        halt();
+        halt(\$resultsDir);
     }
-	elsif ( ! -e "plugin_out/AmpliconCoverageAnalysis" ) {
+	if ( ! -e "plugin_out/AmpliconCoverageAnalysis" ) {
 		print $msg timestamp('timestamp') . " $warn AmpliconCoverageAnalysis is missing. Data may be prior to implementation.\n";
         remove_file( "plugin_out/AmpliconCoverageAnalysis_out", \@archivelist );
     }
-    elsif ( ! -e glob("basecaller_results/datasets*") ) {
+    if ( ! -e glob("basecaller_results/datasets*") ) {
         print $msg timestamp('timestamp') . " $info No 'datasets_basecaller.json' or 'datasets_pipeline.json' files found.  Data may be prior to TSv4.0 implementation.\n";
         remove_file( "basecaller_results/datasets_basecaller.json", \@archivelist );
         remove_file( "basecaller_results/datasets_pipeline.json", \@archivelist );
 	} 
-    else {
-		print $msg timestamp('timestamp') . " All data located.  Proceeding with archive creation\n"; 
-	}
+
+    print $msg timestamp('timestamp') . " All data located.  Proceeding with archive creation\n"; 
 
     #dd \@archivelist;
     #exit;
@@ -302,10 +305,12 @@ if ( $archive ) {
 	if ( archive_data( \@archivelist, $archive_name ) == 1 ) {
 		print $msg timestamp('timestamp') . " Archival of experiment '$output' completed successfully\n\n";
 		print "Experiment archive completed successfully\n" if $quiet == 1;
+        # XXX
+        send_mail( "success", \$resultsDir, \$case_num );
 	} else {
 		print $msg timestamp('timestamp') . " $err Archive creation failed for '$output'.  Check the logfiles for details\n\n";
 		print "$err Archive creation failed for '$output'. Check /var/log/mocha/archive.log for details\n\n" if $quiet == 1;
-		halt();
+		halt(\$resultsDir);
 	}
 }
 
@@ -462,7 +467,9 @@ sub timestamp {
 }
 
 sub halt {
-	print $msg timestamp('timestamp') . " $err The archive script encountered errors and was unable to complete successfully\n\n";
+    my $expt_name = shift;
+	print $msg timestamp('timestamp') . "The archive script encountered errors and was unable to complete successfully\n\n";
+    send_mail( "failure", $expt_name );
 	exit 1;
 }
 
@@ -475,7 +482,7 @@ sub mount_check {
     open ( my $mount_fh, "<", '/proc/mounts' ) || die "Can't open '/proc/mounts' for reading: $!";
     if ( ! (grep { $_ =~ /$$mount_point/ } <$mount_fh>) && ! -e $$mount_point ) {
 		print $msg timestamp('timestamp') . " $err The remote fileshare or destination dir is not mounted! You must mount this share before proceeding\n";
-        halt();
+        halt(\$resultsDir);
 	} else {
 		print $msg timestamp('timestamp') . " The remote fileshare is mounted and accessible.\n";
 	}
@@ -543,11 +550,80 @@ sub create_archive_dir {
     my $archive_dir = "$$path/$$case";
 
     if ( -e $archive_dir ) {
-        print $msg timestamp('timestamp') . " $err Directory '$archive_dir' already exists. Stopping.\n";
-        exit 1;
+        print $msg timestamp('timestamp') . " $warn Directory '$archive_dir' already exists. Adding data to '$archive_dir'.\n";
+    } else {
+        print $msg timestamp('timestamp') . " Creating subdirectory '$archive_dir' to put archive into...\n";
+        mkdir( "$archive_dir" ) || die "$err Can not create an archive directory in '$$path'";
     }
-    print $msg timestamp('timestamp') . " Creating subdirectory '$archive_dir' to put archive into...\n";
-    mkdir( "$archive_dir" ) || die "$err Can not create an archive directory in '$$path'";
 
     return $archive_dir;
+}
+
+sub send_mail {
+    # Send out a system email upon error or completion of archive
+    use File::Slurp;
+    use Email::MIME;
+    use Email::Sender::Simple qw( sendmail );
+    
+    my $status = shift;
+    my $expt_name = shift;
+    my $case = shift;
+
+    $$case = "---" if ( ! defined $$case );
+
+
+    $$expt_name =~ s/\/$//;
+    my $template_path = "/home/ionadmin/templates/email/";
+    my $target = 'simsdj@mail.nih.gov';
+    my @additional_recipients = qw( 
+        harringtonrd@mail.nih.gov
+        vivekananda.datta@nih.gov
+
+        );
+        #patricia.runge@nih.gov
+    #my @additional_recipients = qw( 
+        #dave@lamneth.net
+        #harringtonrd@mail.nih.gov
+        #misc@lamneth.net
+        #);
+
+    if ( $debug ) {
+        print "============  DEBUG  ============\n";
+        print "\tstatus: $status\n";
+        print "\tcase: $$case\n";
+        print "\tname: $$expt_name\n";
+        print "=================================\n";
+        exit;
+    }
+    
+    my ($msg, $cc_list);
+    #($status eq 'success') ? ($msg = "$template_path/archive_success.email") : ($msg = "$template_path/archive_failure.email");
+    if ( $status eq 'success' ) {
+        $msg = "$template_path/archive_success.email";
+        $cc_list = join( ";", @additional_recipients );
+    }
+    elsif ( $status eq 'failure' ) {
+        $msg = "$template_path/archive_failure.email";
+        $cc_list = '';
+    }
+    my $content = read_file($msg);
+    $content =~ s/%%CASE_NUM%%/$$case/;
+    $content =~ s/%%EXPT%%/$$expt_name/;
+
+    my $message = Email::MIME->create(
+        header_str => [
+            From     => 'ionadmin@mcc-clia.ncifcrf.gov',
+            To       => $target,
+            Cc       => $cc_list, 
+            Subject  => "Archive Summary for $$expt_name",
+            ],
+            attributes  => {
+                encoding      => 'quoted-printable',
+                content_type  => 'text/html',
+                charset       => 'ISO-8859-1',
+            },
+            body_str => $content,
+        );
+
+        sendmail($message);
 }
