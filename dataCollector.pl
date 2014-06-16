@@ -31,7 +31,7 @@ use Data::Dump;
 my $debug = 0;
 
 my $scriptname = basename($0);
-my $version = "v2.0.060514";
+my $version = "v2.0.1_060514";
 my $description = <<"EOT";
 Program to grab data from an Ion Torrent Run and either archive it, or create a directory that can be imported 
 to another analysis computer for processing.  
@@ -253,10 +253,6 @@ if ( $extract ) {
 # Run full archive on data.
 if ( $archive ) {
 
-    # XXX
-    #send_mail("failure", \$case_num, \$resultsDir );
-    #exit;
-
 	chdir( $resultsDir ) || die "Can not access the results directory selected: $resultsDir. $!";
 	my $archive_name = "$output.tar.gz";
 	print $msg timestamp('timestamp') . " $username has started archive on '$output'.\n";
@@ -270,27 +266,29 @@ if ( $archive ) {
 	push( @archivelist, $_ ) for @plugins;
 
 	# Add check to be sure that all of the results dirs and logs are there. Exit otherwise so we don't miss anything
+	#if ( ! grep { /collectedVariants/ } @archivelist ) {
 	if ( ! -e "collectedVariants" ) {
 		print $msg timestamp('timestamp') . " $info CollectedVariants directory is not present. Skipping.\n";
         remove_file( "collectedVariants", \@archivelist );
 	} 
-	if ( ! -e "plugin_out/variantCaller_out" ) {
+	if ( ! grep { /plugin_out\/variantCaller_out/ } @archivelist ) {
 		print $msg timestamp('timestamp') . " $err TVC results directory is missing.  Did you run TVC?\n";
 		halt(\$resultsDir);
 	}
-	if ( ! -e "plugin_out/AmpliconCoveragePlots_out" ) {
+	if ( ! grep { /plugin_out\/AmpliconCoveragePlots_out/ } @archivelist ) {
 		print $msg timestamp('timestamp') . " $warn AmpliconCoveragePlots directory is not present. Skipping.\n";
         remove_file( "plugin_out/AmpliconCoveragePlots", \@archivelist );
     }
-	if ( ! -e "plugin_out/varCollector_out" ) {
+	if ( ! grep { /plugin_out\/varCollector_out/ } @archivelist ) {
 		print $msg timestamp('timestamp') . " $err No varCollector plugin data.  Did you run varCollector?\n";
         halt(\$resultsDir);
     }
-	if ( ! -e "plugin_out/AmpliconCoverageAnalysis" ) {
+	if ( ! grep { /plugin_out\/AmpliconCoverageAnalysis/ } @archivelist ) {
 		print $msg timestamp('timestamp') . " $warn AmpliconCoverageAnalysis is missing. Data may be prior to implementation.\n";
         remove_file( "plugin_out/AmpliconCoverageAnalysis_out", \@archivelist );
     }
-    if ( ! -e glob("basecaller_results/datasets*") ) {
+    #if ( ! grep { /basecaller_results\/datasets_(basecaller|pipeline)\.json/ } @archivelist ) {
+    if ( ! -e glob( "basecaller_results/datasets*" ) ) {
         print $msg timestamp('timestamp') . " $info No 'datasets_basecaller.json' or 'datasets_pipeline.json' files found.  Data may be prior to TSv4.0 implementation.\n";
         remove_file( "basecaller_results/datasets_basecaller.json", \@archivelist );
         remove_file( "basecaller_results/datasets_pipeline.json", \@archivelist );
@@ -301,11 +299,16 @@ if ( $archive ) {
     #dd \@archivelist;
     #exit;
 
+    if ( $debug ) {
+        print "\n==============  DEBUG  ===============\n";
+        dd \@archivelist;
+        print "======================================\n\n";
+    }
+
 	# Run the archive subs
 	if ( archive_data( \@archivelist, $archive_name ) == 1 ) {
 		print $msg timestamp('timestamp') . " Archival of experiment '$output' completed successfully\n\n";
 		print "Experiment archive completed successfully\n" if $quiet == 1;
-        # XXX
         send_mail( "success", \$resultsDir, \$case_num );
 	} else {
 		print $msg timestamp('timestamp') . " $err Archive creation failed for '$output'.  Check the logfiles for details\n\n";
@@ -343,7 +346,6 @@ sub archive_data {
     # Check the fileshare before we start
     mount_check(\$path);
 
-    # XXX
     # Create a archive subdirectory to put all data in.
     my $archive_dir;
     if ( $case_num ) {
@@ -435,7 +437,6 @@ sub archive_data {
 
 	# check integrity of the tarball
 	print $msg timestamp('timestamp') . " Calculating MD5 hash for copied archive.\n";
-    #my $moved_archive = "$path/$archivename";
     my $moved_archive = "$archive_dir/$archivename";
 
 	open( my $post_fh, "<", $moved_archive ) || die "Can't open the archive tarball for reading: $!";
@@ -569,7 +570,7 @@ sub send_mail {
     use File::Slurp;
     use Email::MIME;
     use Email::Sender::Simple qw( sendmail );
-    
+
     my $status = shift;
     my $expt_name = shift;
     my $case = shift;
@@ -596,7 +597,6 @@ sub send_mail {
     }
     
     my ($msg, $cc_list);
-    #($status eq 'success') ? ($msg = "$template_path/archive_success.email") : ($msg = "$template_path/archive_failure.email");
     if ( $status eq 'success' ) {
         $msg = "$template_path/archive_success.email";
         $cc_list = join( ";", @additional_recipients );
