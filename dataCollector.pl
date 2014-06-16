@@ -79,7 +79,7 @@ GetOptions( "help"      => \$help,
             "output"    => \$output,
             "dir=s"     => \$outdir,
             "case=s"    => \$case_num,
-            "randd=d"   => \$r_and_d,
+            "randd"     => \$r_and_d,
         ) or do { print "\n$usage\n"; exit 1; };
 
 sub help {
@@ -366,7 +366,7 @@ sub archive_data {
 	}
 	process_md5_files( $filelist );
 	push( @$filelist, 'md5sum.txt' );
-	
+
 	print $msg timestamp('timestamp') . " Creating a tarball archive of $archivename.\n";
 
 	# Use two step tar process with 'pigz' multicore gzip utility to speed things up a bit. 
@@ -522,6 +522,7 @@ sub process_md5_files {
 sub md5sum {
 	# Generate an md5sum for a file and write to a textfile
 	my $file = shift;
+
 	my $md5_list = "md5sum.txt";
 	open( my $md5_fh, ">>", $md5_list ) || die "Can't open the md5sum.txt file for writing: $!";
 
