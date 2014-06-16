@@ -29,9 +29,10 @@ use Getopt::Long;
 use Data::Dump;
 
 my $debug = 0;
+my $r_and_d = 1;
 
 my $scriptname = basename($0);
-my $version = "v2.0.1_060514";
+my $version = "v2.0.2_060514";
 my $description = <<"EOT";
 Program to grab data from an Ion Torrent Run and either archive it, or create a directory that can be imported 
 to another analysis computer for processing.  
@@ -256,6 +257,7 @@ if ( $archive ) {
 	chdir( $resultsDir ) || die "Can not access the results directory selected: $resultsDir. $!";
 	my $archive_name = "$output.tar.gz";
 	print $msg timestamp('timestamp') . " $username has started archive on '$output'.\n";
+    print $msg timestamp('timestamp') . " $info Running in R&D mode.\n" if ($r_and_d == 1);
 	
 	# Add in extra BAM files and such
 	my @data = grep { -f } glob( '*.barcode.bam.zip *.support.zip' );
@@ -574,18 +576,22 @@ sub send_mail {
     my $status = shift;
     my $expt_name = shift;
     my $case = shift;
+    my @additional_recipients;
 
     $$case = "---" if ( ! defined $$case );
-
 
     $$expt_name =~ s/\/$//;
     my $template_path = "/home/ionadmin/templates/email/";
     my $target = 'simsdj@mail.nih.gov';
-    my @additional_recipients = qw( 
+    if ( $r_and_d == 1 ) {
+        @additional_recipients = '';
+    } else {
+        @additional_recipients = qw( 
         harringtonrd@mail.nih.gov
         vivekananda.datta@nih.gov
         patricia.runge@nih.gov
         );
+    }
 
     if ( $debug ) {
         print "============  DEBUG  ============\n";
