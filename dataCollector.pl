@@ -29,10 +29,9 @@ use Getopt::Long;
 use Data::Dump;
 
 my $debug = 0;
-my $r_and_d = 1;
 
 my $scriptname = basename($0);
-my $version = "v2.0.2_060514";
+my $version = "v2.1.0_061614";
 my $description = <<"EOT";
 Program to grab data from an Ion Torrent Run and either archive it, or create a directory that can be imported 
 to another analysis computer for processing.  
@@ -56,6 +55,7 @@ USAGE: $scriptname [options] [-a | -e] <results dir>
     -c, --case       Case number to use for new directory generation
     -o, --output     Custom output file name.  (DEFAULT: 'run_name.mmddyyy')
     -d, --dir        Custom output / destination  directory (DEFAULT: /results/xfer/ for extract and /media/Aperio for archive)
+    -r, --randd      Server is R&D server; do not email notify group and be more flexible with missing data.
     -q, --quiet      Run quietly without sending messages to STDOUT
     -v, --version    Version Information
     -h, --help       Display the help information
@@ -69,6 +69,7 @@ my $output;
 my $quiet = 0;
 my $outdir = '';
 my $case_num = '';
+my $r_and_d;
 
 GetOptions( "help"      => \$help,
             "version"   => \$verInfo,
@@ -78,6 +79,7 @@ GetOptions( "help"      => \$help,
             "output"    => \$output,
             "dir=s"     => \$outdir,
             "case=s"    => \$case_num,
+            "randd=d"   => \$r_and_d,
         ) or do { print "\n$usage\n"; exit 1; };
 
 sub help {
@@ -257,7 +259,7 @@ if ( $archive ) {
 	chdir( $resultsDir ) || die "Can not access the results directory selected: $resultsDir. $!";
 	my $archive_name = "$output.tar.gz";
 	print $msg timestamp('timestamp') . " $username has started archive on '$output'.\n";
-    print $msg timestamp('timestamp') . " $info Running in R&D mode.\n" if ($r_and_d == 1);
+    print $msg timestamp('timestamp') . " $info Running in R&D mode.\n" if $r_and_d;
 	
 	# Add in extra BAM files and such
 	my @data = grep { -f } glob( '*.barcode.bam.zip *.support.zip' );
@@ -583,7 +585,7 @@ sub send_mail {
     $$expt_name =~ s/\/$//;
     my $template_path = "/home/ionadmin/templates/email/";
     my $target = 'simsdj@mail.nih.gov';
-    if ( $r_and_d == 1 ) {
+    if ( $r_and_d ) {
         @additional_recipients = '';
     } else {
         @additional_recipients = qw( 
