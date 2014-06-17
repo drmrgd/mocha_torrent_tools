@@ -144,7 +144,7 @@ if ( $head !~ /VCFv4/ ) {
     print "$usage\n";
     exit 1;
 }
-elsif ( ! $tvc32 && ! grep { /^##source=Torrent Unified Variant Caller.*/ } <$vcf_fh> ) {
+if ( ! $tvc32 && ! grep { /^##source=(Torrent Unified Variant Caller|"tvc 4.*)/ } <$vcf_fh> ) {
     print "WARNING: '$inputVCF' appears to be from TVCv3.2, and the 'tvc32' option was not selected.  The file may not be processed correctly.\n";
     while ( 1 ) {
         print "Continue? [y|n]: ";
