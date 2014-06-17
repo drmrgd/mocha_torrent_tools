@@ -31,7 +31,7 @@ use Data::Dump;
 my $debug = 0;
 
 my $scriptname = basename($0);
-my $version = "v2.0.060514";
+my $version = "v2.1.0_061614";
 my $description = <<"EOT";
 Program to grab data from an Ion Torrent Run and either archive it, or create a directory that can be imported 
 to another analysis computer for processing.  
@@ -55,6 +55,7 @@ USAGE: $scriptname [options] [-a | -e] <results dir>
     -c, --case       Case number to use for new directory generation
     -o, --output     Custom output file name.  (DEFAULT: 'run_name.mmddyyy')
     -d, --dir        Custom output / destination  directory (DEFAULT: /results/xfer/ for extract and /media/Aperio for archive)
+    -r, --randd      Server is R&D server; do not email notify group and be more flexible with missing data.
     -q, --quiet      Run quietly without sending messages to STDOUT
     -v, --version    Version Information
     -h, --help       Display the help information
@@ -68,6 +69,7 @@ my $output;
 my $quiet = 0;
 my $outdir = '';
 my $case_num = '';
+my $r_and_d;
 
 GetOptions( "help"      => \$help,
             "version"   => \$verInfo,
@@ -77,6 +79,7 @@ GetOptions( "help"      => \$help,
             "output"    => \$output,
             "dir=s"     => \$outdir,
             "case=s"    => \$case_num,
+            "randd"     => \$r_and_d,
         ) or do { print "\n$usage\n"; exit 1; };
 
 sub help {
@@ -253,13 +256,10 @@ if ( $extract ) {
 # Run full archive on data.
 if ( $archive ) {
 
-    # XXX
-    #send_mail("failure", \$case_num, \$resultsDir );
-    #exit;
-
 	chdir( $resultsDir ) || die "Can not access the results directory selected: $resultsDir. $!";
 	my $archive_name = "$output.tar.gz";
 	print $msg timestamp('timestamp') . " $username has started archive on '$output'.\n";
+    print $msg timestamp('timestamp') . " $info Running in R&D mode.\n" if $r_and_d;
 	
 	# Add in extra BAM files and such
 	my @data = grep { -f } glob( '*.barcode.bam.zip *.support.zip' );
@@ -270,27 +270,29 @@ if ( $archive ) {
 	push( @archivelist, $_ ) for @plugins;
 
 	# Add check to be sure that all of the results dirs and logs are there. Exit otherwise so we don't miss anything
+	#if ( ! grep { /collectedVariants/ } @archivelist ) {
 	if ( ! -e "collectedVariants" ) {
 		print $msg timestamp('timestamp') . " $info CollectedVariants directory is not present. Skipping.\n";
         remove_file( "collectedVariants", \@archivelist );
 	} 
-	if ( ! -e "plugin_out/variantCaller_out" ) {
+	if ( ! grep { /plugin_out\/variantCaller_out/ } @archivelist ) {
 		print $msg timestamp('timestamp') . " $err TVC results directory is missing.  Did you run TVC?\n";
 		halt(\$resultsDir);
 	}
-	if ( ! -e "plugin_out/AmpliconCoveragePlots_out" ) {
+	if ( ! grep { /plugin_out\/AmpliconCoveragePlots_out/ } @archivelist ) {
 		print $msg timestamp('timestamp') . " $warn AmpliconCoveragePlots directory is not present. Skipping.\n";
         remove_file( "plugin_out/AmpliconCoveragePlots", \@archivelist );
     }
-	if ( ! -e "plugin_out/varCollector_out" ) {
+	if ( ! grep { /plugin_out\/varCollector_out/ } @archivelist ) {
 		print $msg timestamp('timestamp') . " $err No varCollector plugin data.  Did you run varCollector?\n";
         halt(\$resultsDir);
     }
-	if ( ! -e "plugin_out/AmpliconCoverageAnalysis" ) {
+	if ( ! grep { /plugin_out\/AmpliconCoverageAnalysis/ } @archivelist ) {
 		print $msg timestamp('timestamp') . " $warn AmpliconCoverageAnalysis is missing. Data may be prior to implementation.\n";
         remove_file( "plugin_out/AmpliconCoverageAnalysis_out", \@archivelist );
     }
-    if ( ! -e glob("basecaller_results/datasets*") ) {
+    #if ( ! grep { /basecaller_results\/datasets_(basecaller|pipeline)\.json/ } @archivelist ) {
+    if ( ! -e glob( "basecaller_results/datasets*" ) ) {
         print $msg timestamp('timestamp') . " $info No 'datasets_basecaller.json' or 'datasets_pipeline.json' files found.  Data may be prior to TSv4.0 implementation.\n";
         remove_file( "basecaller_results/datasets_basecaller.json", \@archivelist );
         remove_file( "basecaller_results/datasets_pipeline.json", \@archivelist );
@@ -301,11 +303,16 @@ if ( $archive ) {
     #dd \@archivelist;
     #exit;
 
+    if ( $debug ) {
+        print "\n==============  DEBUG  ===============\n";
+        dd \@archivelist;
+        print "======================================\n\n";
+    }
+
 	# Run the archive subs
 	if ( archive_data( \@archivelist, $archive_name ) == 1 ) {
 		print $msg timestamp('timestamp') . " Archival of experiment '$output' completed successfully\n\n";
 		print "Experiment archive completed successfully\n" if $quiet == 1;
-        # XXX
         send_mail( "success", \$resultsDir, \$case_num );
 	} else {
 		print $msg timestamp('timestamp') . " $err Archive creation failed for '$output'.  Check the logfiles for details\n\n";
@@ -343,7 +350,6 @@ sub archive_data {
     # Check the fileshare before we start
     mount_check(\$path);
 
-    # XXX
     # Create a archive subdirectory to put all data in.
     my $archive_dir;
     if ( $case_num ) {
@@ -360,7 +366,7 @@ sub archive_data {
 	}
 	process_md5_files( $filelist );
 	push( @$filelist, 'md5sum.txt' );
-	
+
 	print $msg timestamp('timestamp') . " Creating a tarball archive of $archivename.\n";
 
 	# Use two step tar process with 'pigz' multicore gzip utility to speed things up a bit. 
@@ -435,7 +441,6 @@ sub archive_data {
 
 	# check integrity of the tarball
 	print $msg timestamp('timestamp') . " Calculating MD5 hash for copied archive.\n";
-    #my $moved_archive = "$path/$archivename";
     my $moved_archive = "$archive_dir/$archivename";
 
 	open( my $post_fh, "<", $moved_archive ) || die "Can't open the archive tarball for reading: $!";
@@ -517,6 +522,7 @@ sub process_md5_files {
 sub md5sum {
 	# Generate an md5sum for a file and write to a textfile
 	my $file = shift;
+
 	my $md5_list = "md5sum.txt";
 	open( my $md5_fh, ">>", $md5_list ) || die "Can't open the md5sum.txt file for writing: $!";
 
@@ -569,22 +575,26 @@ sub send_mail {
     use File::Slurp;
     use Email::MIME;
     use Email::Sender::Simple qw( sendmail );
-    
+
     my $status = shift;
     my $expt_name = shift;
     my $case = shift;
+    my @additional_recipients;
 
     $$case = "---" if ( ! defined $$case );
-
 
     $$expt_name =~ s/\/$//;
     my $template_path = "/home/ionadmin/templates/email/";
     my $target = 'simsdj@mail.nih.gov';
-    my @additional_recipients = qw( 
+    if ( $r_and_d ) {
+        @additional_recipients = '';
+    } else {
+        @additional_recipients = qw( 
         harringtonrd@mail.nih.gov
         vivekananda.datta@nih.gov
         patricia.runge@nih.gov
         );
+    }
 
     if ( $debug ) {
         print "============  DEBUG  ============\n";
@@ -596,7 +606,6 @@ sub send_mail {
     }
     
     my ($msg, $cc_list);
-    #($status eq 'success') ? ($msg = "$template_path/archive_success.email") : ($msg = "$template_path/archive_failure.email");
     if ( $status eq 'success' ) {
         $msg = "$template_path/archive_success.email";
         $cc_list = join( ";", @additional_recipients );

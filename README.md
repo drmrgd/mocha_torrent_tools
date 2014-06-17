@@ -40,3 +40,7 @@ newest runs onto the stack.  This will, of course, remove older runs that won't 
 - <b>vcfExtractor.pl</b>: A program to extract data from VCF files generated from the TS v4.0.  Can either
 extract the whole dataset or a specific variant by position, and print out a simplified variant call
 listing.
+
+- <b>sample_renamer.pl</b>: Using a tab delimited samplekey file with the barcode and sample name, rename any
+ion file (e.g. IonXpress_xxx_rawlib.bam) with the sample name.  The barcode will be replaced by the sample name
+that's indicated in the key file.
