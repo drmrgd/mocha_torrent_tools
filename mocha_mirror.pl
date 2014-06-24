@@ -13,11 +13,11 @@ use strict;
 use Getopt::Long;
 use File::Find;
 use File::Path;
-use Data::Dumper;
+use Data::Dump;
 use Log::Log4perl qw{ get_logger };
 
 ( my $scriptname = $0 ) =~ s/^(.*\/)+//;
-my $version = "v1.1.0";
+my $version = "v1.2.0_062414";
 my $description = <<"EOT";
 Script to mirror report data to an external hard drive mounted at /media/MoCha_backup.  This script will determine
 the data size of the external hard drive, and if needed rotate out the oldest run (note: not determined by last
@@ -83,6 +83,7 @@ my $data_size = check_size();
 # Set total allowed size to ~3.3 TB to allow for overhead space
 while ( $data_size > 3300000 ) {
     $logger->info("Backup drive too full.  Clearing space for new runs");
+
     rotate_data( \$backup_path );
     $data_size = check_size();
 } 
@@ -117,20 +118,19 @@ sub check_mount {
 }
 
 sub rotate_data {
+    # Use server generated report number (last number in string) to sort runs, and rotate off the oldest to
+    # make room for new data
     my $path = shift;
 
     opendir( my $backup, $$path ) || $logger->logdie( "Can't read the MoCha backup drive: $!");
-    my @data = sort ( grep { ! /^(:?[.]+) | lost/x } readdir( $backup ) );
-
-    my $expt_to_remove = shift @data;
+    my @sorted_expts = sort_data( [grep { ! /^(:?[.]+) | lost/x } readdir($backup)] ); 
+    my $expt_to_remove = shift @sorted_expts;
 
     $logger->info("Removing '$$path/$expt_to_remove' to make space for new data");
     rmtree( "$$path/$expt_to_remove" );
 }
 
 sub get_runlist {
-    # TODO: revise logic for loading up list.  Will not fill in gaps currently, which may not be 
-    # too big a deal at the moment as this should run constantly and no gaps will be created.
     my $bak_path = shift;
     my $data_path = shift;
 
