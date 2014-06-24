@@ -30,9 +30,6 @@ archive for permanent storage on a secure server for historic purposes.
 - <b>from_archive_analyze.pl</b>: A program to extract the data exported from dataCollector and launch
 a reanalysis of the experiment using the current software version.
 
-- <b>genemed_compare.pl</b>: Starting with either the XLS or a CSV derived from the XLS report, compare GeneMed
-output from different versions of the Torrent Variant Caller.
-
 - <b>mocha_mirror.pl</b>: Script to mirror processed Ion Torrent report data to an external harddrive.  The 
 program will store as many runs as can fit on the drive by assessing the du of the drive and pushing the 
 newest runs onto the stack.  This will, of course, remove older runs that won't fit.
