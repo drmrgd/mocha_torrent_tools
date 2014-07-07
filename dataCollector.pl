@@ -169,7 +169,7 @@ my @exportFileList = qw{
 	sigproc_results/avgNukeTrace_ATCG.txt
 	sigproc_results/avgNukeTrace_TCAG.txt
 	explog.txt
-	explog_final.txt
+    explog_final.txt
 };
 
 my @archivelist = qw{ 
@@ -177,6 +177,7 @@ my @archivelist = qw{
 	collectedVariants
     basecaller_results/datasets_basecaller.json
     basecaller_results/datasets_pipeline.json
+    pgm_logs.zip
 };
 
 # Just run the export subroutine for pushing data to a different server
@@ -270,7 +271,10 @@ if ( $archive ) {
 	push( @archivelist, $_ ) for @plugins;
 
 	# Add check to be sure that all of the results dirs and logs are there. Exit otherwise so we don't miss anything
-	#if ( ! grep { /collectedVariants/ } @archivelist ) {
+	if ( ! -e "explog_final.txt" ) {
+		print $msg timestamp('timestamp') . " $warn explog_final is not present; may be deleted due to data archiving. Skipping.\n";
+        remove_file( "explog_final.txt", \@archivelist );
+	} 
 	if ( ! -e "collectedVariants" ) {
 		print $msg timestamp('timestamp') . " $info CollectedVariants directory is not present. Skipping.\n";
         remove_file( "collectedVariants", \@archivelist );
