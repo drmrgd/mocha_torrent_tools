@@ -31,7 +31,7 @@ use Data::Dump;
 my $debug = 0;
 
 my $scriptname = basename($0);
-my $version = "v2.1.0_061614";
+my $version = "v2.2.0_070714";
 my $description = <<"EOT";
 Program to grab data from an Ion Torrent Run and either archive it, or create a directory that can be imported 
 to another analysis computer for processing.  
@@ -264,34 +264,39 @@ if ( $archive ) {
 	
 	# Add in extra BAM files and such
 	my @data = grep { -f } glob( '*.barcode.bam.zip *.support.zip' );
-	my @plugins = grep { -d } glob( 'plugin_out/AmpliconCoveragePlots* plugin_out/variantCaller* plugin_out/varCollector* plugin_out/AmpliconCoverageAnalysis*' );
+	#my @plugins = grep { -d } glob( 'plugin_out/AmpliconCoveragePlots* plugin_out/variantCaller* plugin_out/varCollector* plugin_out/AmpliconCoverageAnalysis*' );
 
+	my @plugins = qw( plugin_out/AmpliconCoveragePlots_out
+                      plugin_out/variantCaller_out 
+                      plugin_out/varCollector_out 
+                      plugin_out/AmpliconCoverageAnalysis_out
+                    );
 	push( @archivelist, $_ ) for @data;
 	push( @archivelist, $_ ) for @exportFileList;
 	push( @archivelist, $_ ) for @plugins;
 
 	# Add check to be sure that all of the results dirs and logs are there. Exit otherwise so we don't miss anything
-	if ( ! -e "explog_final.txt" ) {
-		print $msg timestamp('timestamp') . " $warn explog_final is not present; may be deleted due to data archiving. Skipping.\n";
+    if ( ! -e "explog_final.txt" ) {
+        print $msg timestamp('timestamp') . " $warn explog_final is not present; may be deleted due to data archiving. Skipping.\n";
         remove_file( "explog_final.txt", \@archivelist );
-	} 
-	if ( ! -e "collectedVariants" ) {
-		print $msg timestamp('timestamp') . " $info CollectedVariants directory is not present. Skipping.\n";
+    } 
+    if ( ! -e "collectedVariants" ) {
+        print $msg timestamp('timestamp') . " $info CollectedVariants directory is not present. Skipping.\n";
         remove_file( "collectedVariants", \@archivelist );
-	} 
-	if ( ! grep { /plugin_out\/variantCaller_out/ } @archivelist ) {
-		print $msg timestamp('timestamp') . " $err TVC results directory is missing.  Did you run TVC?\n";
-		halt(\$resultsDir);
-	}
-	if ( ! grep { /plugin_out\/AmpliconCoveragePlots_out/ } @archivelist ) {
-		print $msg timestamp('timestamp') . " $warn AmpliconCoveragePlots directory is not present. Skipping.\n";
-        remove_file( "plugin_out/AmpliconCoveragePlots", \@archivelist );
-    }
-	if ( ! grep { /plugin_out\/varCollector_out/ } @archivelist ) {
-		print $msg timestamp('timestamp') . " $err No varCollector plugin data.  Did you run varCollector?\n";
+    } 
+    if ( ! -d "plugin_out\/variantCaller_out/" ) {
+        print $msg timestamp('timestamp') . " $err TVC results directory is missing.  Did you run TVC?\n";
         halt(\$resultsDir);
     }
-	if ( ! grep { /plugin_out\/AmpliconCoverageAnalysis/ } @archivelist ) {
+    if ( ! -d "plugin_out\/AmpliconCoveragePlots_out/" ) {
+        print $msg timestamp('timestamp') . " $warn AmpliconCoveragePlots directory is not present. Skipping.\n";
+        remove_file( "plugin_out/AmpliconCoveragePlots", \@archivelist );
+    }
+    if ( ! -d "plugin_out\/varCollector_out/" ) {
+        print $msg timestamp('timestamp') . " $err No varCollector plugin data.  Did you run varCollector?\n";
+        halt(\$resultsDir);
+    }
+	if ( ! -d "plugin_out\/AmpliconCoverageAnalysis/" ) {
 		print $msg timestamp('timestamp') . " $warn AmpliconCoverageAnalysis is missing. Data may be prior to implementation.\n";
         remove_file( "plugin_out/AmpliconCoverageAnalysis_out", \@archivelist );
     }
@@ -303,9 +308,6 @@ if ( $archive ) {
 	} 
 
     print $msg timestamp('timestamp') . " All data located.  Proceeding with archive creation\n"; 
-
-    #dd \@archivelist;
-    #exit;
 
     if ( $debug ) {
         print "\n==============  DEBUG  ===============\n";
@@ -331,9 +333,8 @@ sub remove_file {
     my $filelist = shift;
 
     print $msg timestamp('timestamp') . " Removing file '$file' from archive list\n";
-
-    my $index = grep { $archivelist[$_] =~ /$file/ } 0..$#archivelist;
-    splice( @archivelist, $index, 1 );
+    my ($index) = grep { $archivelist[$_] eq $file } 0..$#$filelist;
+    splice( @$filelist, $index, 1 );
 
     return;
 }
