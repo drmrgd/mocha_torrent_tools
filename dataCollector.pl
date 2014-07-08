@@ -19,19 +19,18 @@ use strict;
 use File::Copy;
 use File::Basename;
 use IO::Tee;
-use POSIX qw{ strftime };
+use POSIX qw(strftime);
 use Text::Wrap;
 use Term::ANSIColor;
 use Cwd;
 use Digest::MD5;
-use File::Path qw{ remove_tree };
-use Getopt::Long;
+use File::Path qw(remove_tree);
+use Getopt::Long qw(:config bundling auto_abbrev no_ignore_case);
 use Data::Dump;
 
-my $debug = 0;
 
 my $scriptname = basename($0);
-my $version = "v2.2.0_070714";
+my $version = "v2.4.0_070814";
 my $description = <<"EOT";
 Program to grab data from an Ion Torrent Run and either archive it, or create a directory that can be imported 
 to another analysis computer for processing.  
@@ -57,6 +56,7 @@ USAGE: $scriptname [options] [-a | -e] <results dir>
     -d, --dir        Custom output / destination  directory (DEFAULT: /results/xfer/ for extract and /media/Aperio for archive)
     -r, --randd      Server is R&D server; do not email notify group and be more flexible with missing data.
     -q, --quiet      Run quietly without sending messages to STDOUT
+    -D, --DEBUG      Output debugging information
     -v, --version    Version Information
     -h, --help       Display the help information
 EOT
@@ -70,16 +70,18 @@ my $quiet = 0;
 my $outdir = '';
 my $case_num = '';
 my $r_and_d;
+my $debug = 0;
 
-GetOptions( "help"      => \$help,
-            "version"   => \$verInfo,
-            "quiet"     => \$quiet,
-            "extract"   => \$extract,
-            "archive"   => \$archive,
-            "output"    => \$output,
-            "dir=s"     => \$outdir,
-            "case=s"    => \$case_num,
-            "randd"     => \$r_and_d,
+GetOptions( "help|h"      => \$help,
+            "version|v"   => \$verInfo,
+            "quiet|q"     => \$quiet,
+            "extract|e"   => \$extract,
+            "archive|a"   => \$archive,
+            "output|o"    => \$output,
+            "dir|d=s"     => \$outdir,
+            "case|c=s"    => \$case_num,
+            "randd|r"     => \$r_and_d,
+            "DEBUG|D"     => \$debug,
         ) or do { print "\n$usage\n"; exit 1; };
 
 sub help {
@@ -212,8 +214,10 @@ if ( $extract ) {
 		
 	}
 		if ( $debug ) {
-			print "DEBUG: contents of 'exportFileList':\n";
+            print "\n==============  DEBUG  ===============\n";
+			print "Contents of 'exportFileList':\n";
 			print "\t$_\n" for @exportFileList;
+            print "======================================\n\n";
 		}
 
 	# Add 'analysis_return_code' file to be compatible with TSv3.4+
@@ -284,19 +288,29 @@ if ( $archive ) {
         print $msg timestamp('timestamp') . " $info CollectedVariants directory is not present. Skipping.\n";
         remove_file( "collectedVariants", \@archivelist );
     } 
-    if ( ! -d "plugin_out\/variantCaller_out/" ) {
-        print $msg timestamp('timestamp') . " $err TVC results directory is missing.  Did you run TVC?\n";
-        halt(\$resultsDir);
+    if ( ! -d "plugin_out/variantCaller_out/" ) {
+        if ( $r_and_d ) {
+            print $msg timestamp('timestamp') . " $warn No TVC results directory.  Skipping.\n";
+            remove_file( "plugin_out/variantCaller_out", \@archivelist );
+        } else {
+            print $msg timestamp('timestamp') . " $err TVC results directory is missing.  Did you run TVC?\n";
+            halt(\$resultsDir);
+        }
     }
-    if ( ! -d "plugin_out\/AmpliconCoveragePlots_out/" ) {
+    if ( ! -d "plugin_out/AmpliconCoveragePlots_out/" ) {
         print $msg timestamp('timestamp') . " $warn AmpliconCoveragePlots directory is not present. Skipping.\n";
-        remove_file( "plugin_out/AmpliconCoveragePlots", \@archivelist );
+        remove_file( "plugin_out/AmpliconCoveragePlots_out", \@archivelist );
     }
-    if ( ! -d "plugin_out\/varCollector_out/" ) {
-        print $msg timestamp('timestamp') . " $err No varCollector plugin data.  Did you run varCollector?\n";
-        halt(\$resultsDir);
+    if ( ! -d "plugin_out/varCollector_out/" ) {
+        if ( $r_and_d ) {
+            print $msg timestamp('timestamp') . " $warn No varCollector plugin data. Skipping.\n";
+            remove_file( "plugin_out/varCollector_out", \@archivelist );
+        } else {
+            print $msg timestamp('timestamp') . " $err No varCollector plugin data.  Did you run varCollector?\n";
+            halt(\$resultsDir);
+        }
     }
-	if ( ! -d "plugin_out\/AmpliconCoverageAnalysis/" ) {
+	if ( ! -d "plugin_out/AmpliconCoverageAnalysis_out/" ) {
 		print $msg timestamp('timestamp') . " $warn AmpliconCoverageAnalysis is missing. Data may be prior to implementation.\n";
         remove_file( "plugin_out/AmpliconCoverageAnalysis_out", \@archivelist );
     }
@@ -377,7 +391,8 @@ sub archive_data {
 	# Use two step tar process with 'pigz' multicore gzip utility to speed things up a bit. 
 	if ( system( "tar -cf - @$filelist | pigz -9 -p 8 > $archivename" ) != 0 ) {
 		print $msg timestamp('timestamp') . " $err Tarball creation failed: $?.\n"; 
-		return 0;	
+		#return 0;	
+        halt( \$resultsDir );
 	} else {
 		print $msg timestamp('timestamp') . " $info Tarball creation was successful.\n";
 	}
@@ -425,8 +440,11 @@ sub archive_data {
 	binmode( $pre_fh );
 	my $init_tarball_md5 = Digest::MD5->new->addfile($pre_fh)->hexdigest;
 	close( $pre_fh );
-	print "DEBUG: MD5 Hash = " . $init_tarball_md5 . "\n" if $debug;
-
+    if ($debug) {
+        print "\n==============  DEBUG  ===============\n";
+        print "\tMD5 Hash = " . $init_tarball_md5 . "\n"; 
+        print "======================================\n\n";
+    }
 	print $msg timestamp('timestamp') . " Copying archive tarball to '$archive_dir'.\n"; 
 	
     if ( $debug ) {
@@ -453,7 +471,11 @@ sub archive_data {
 	my $post_tarball_md5 = Digest::MD5->new->addfile($post_fh)->hexdigest;
 	close( $post_fh );
 	
-	print "DEBUG: MD5 Hash = " . $post_tarball_md5 . "\n" if $debug;
+    if ($debug) {
+        print "\n==============  DEBUG  ===============\n";
+        print "\tMD5 Hash = " . $post_tarball_md5 . "\n"; 
+        print "======================================\n\n";
+    }
 
 	print $msg timestamp('timestamp') . " Comparing the MD5 hash value for local and fileshare copies of archive.\n";
 	if ( $init_tarball_md5 ne $post_tarball_md5 ) {
@@ -483,7 +505,7 @@ sub timestamp {
 
 sub halt {
     my $expt_name = shift;
-	print $msg timestamp('timestamp') . "The archive script encountered errors and was unable to complete successfully\n\n";
+	print $msg timestamp('timestamp') . " The archive script encountered errors and was unable to complete successfully\n\n";
     send_mail( "failure", $expt_name );
 	exit 1;
 }
@@ -607,8 +629,8 @@ sub send_mail {
         print "\tcase: $$case\n";
         print "\tname: $$expt_name\n";
         print "=================================\n";
-        exit;
     }
+    
     
     my ($msg, $cc_list);
     if ( $status eq 'success' ) {
