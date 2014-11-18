@@ -35,7 +35,7 @@ use constant DEBUG_OUTPUT => 1;
 print "*******  DEVELOPMENT VERSION OF DATACOLLECTOR  *******\n\n";
 
 my $scriptname = basename($0);
-my $version = "v2.4.1_070814";
+my $version = "v2.5.2_111814";
 my $description = <<"EOT";
 Program to grab data from an Ion Torrent Run and either archive it, or create a directory that can be imported 
 to another analysis computer for processing.  
@@ -119,9 +119,6 @@ if ( ! defined $resultsDir ) {
 }
 
 # Find out what TS version running in order to customize some downstream functions
-#open( my $explog_fh, "<", "$resultsDir/explog.txt" ) || die "Can't open the explog.txt file for reading: $!";
-#(my $ts_version) = map { /PGM SW Release:\s+(\d\.\d\.\d)$/ } <$explog_fh>;
-
 open( my $ver_fh, "<", "$resultsDir/version.txt" ) || die "ERROR: can not open the version.txt file for reading: $!";
 (my $ts_version) = map { /Torrent_Suite=(.*)/ } <$ver_fh>;
 close $ver_fh;
@@ -129,10 +126,6 @@ close $ver_fh;
 # Setup custom and default output names
 #my ( $run_name ) = $resultsDir =~ /Auto(?:_user)?_((?:[PM]CC|MC[12])-\d+.*_\d+)\/?$/;
 my ( $run_name ) = $resultsDir =~ /([MP]C[C123]-\d+.*_\d+)\/?$/;;
-
-print "run name: $run_name\n";
-exit;
-
 $output = "$run_name." . timestamp('date') if ( ! defined $output );
 
 my $destination_dir;
@@ -199,15 +192,15 @@ if ( $extract ) {
 	system( "mkdir -p $destination_dir/$output/sigproc_results/" );
 	my $sigproc_out = "$destination_dir/$output/sigproc_results/";
 	
-    if ( -f "$resultsDir/plugin_out/varCollector_out/sampleKey.txt" ) {
-        print "Sample key file located in varCollector plugin data. Adding to export data package.\n";
-        push( @exportFileList, "plugin_out/varCollector_out/sampleKey.txt" );
-    }
-    elsif ( -f "$resultsDir/collectedVariants/sampleKey.txt" ) {
-		print "SampleKey file located in 'collectedVariants/'.  Adding to export data package.\n";
-		push( @exportFileList, "collectedVariants/sampleKey.txt" );		
-	} else {
-		print "No sampleKey file located.  Creating a new one to include in export package.\n";
+    #if ( -f "$resultsDir/plugin_out/varCollector_out/sampleKey.txt" ) {
+        #print "Sample key file located in varCollector plugin data. Adding to export data package.\n";
+        #push( @exportFileList, "plugin_out/varCollector_out/sampleKey.txt" );
+    #}
+    #elsif ( -f "$resultsDir/collectedVariants/sampleKey.txt" ) {
+		#print "SampleKey file located in 'collectedVariants/'.  Adding to export data package.\n";
+		#push( @exportFileList, "collectedVariants/sampleKey.txt" );		
+	#} else {
+		#print "No sampleKey file located.  Creating a new one to include in export package.\n";
 
         # TODO: remove the v3 stuff; too old to be supported any more.
         #(my $major_version = $ts_version) =~ /(\d)\..*/;
@@ -221,13 +214,22 @@ if ( $extract ) {
             #eval { system( "sampleKeyGen -o $resultsDir/sampleKey.txt" );
             #};
         #}
-        eval { system( "sampleKeyGen -o $resultsDir/sampleKey.txt" ) };
-		print "$err SampleKeyGen Script encountered errors: $@" if $@;
+
+        # XXX: Fix sample key file generation.  Either not in right dir to find JSON or not writing the sampleKey
+        # Always make a smaple key...why mess around?
+        print "Generating a sampleKey.txt file for the export package...\n";
+        eval { system( "cd $resultsDir && sampleKeyGen -o sampleKey.txt" ) };
+        if ($@) {
+            print "$err SampleKeyGen Script encountered errors: $@\n";
+            exit;
+        }
 		push( @exportFileList, "$resultsDir/sampleKey.txt" );
+
+        print "DEBUG: cwd is" . cwd() . "\n";
 
         exit;
 		
-	}
+	#}
 		#if ( $debug ) {
 		if ( DEBUG_OUTPUT ) {
             print "\n==============  DEBUG  ===============\n";
