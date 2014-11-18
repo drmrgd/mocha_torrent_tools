@@ -16,6 +16,7 @@
 
 use warnings;
 use strict;
+
 use File::Copy;
 use File::Basename;
 use IO::Tee;
@@ -28,9 +29,13 @@ use File::Path qw(remove_tree);
 use Getopt::Long qw(:config bundling auto_abbrev no_ignore_case);
 use Data::Dump;
 
+use constant DEBUG_OUTPUT => 1;
+
+#print colored( "*******  DEVELOPMENT VERSION OF DATACOLLECTOR  *******\n\n", "bold red on_black");
+print "*******  DEVELOPMENT VERSION OF DATACOLLECTOR  *******\n\n";
 
 my $scriptname = basename($0);
-my $version = "v2.4.0_070814";
+my $version = "v2.4.1_070814";
 my $description = <<"EOT";
 Program to grab data from an Ion Torrent Run and either archive it, or create a directory that can be imported 
 to another analysis computer for processing.  
@@ -56,7 +61,6 @@ USAGE: $scriptname [options] [-a | -e] <results dir>
     -d, --dir        Custom output / destination  directory (DEFAULT: /results/xfer/ for extract and /media/Aperio for archive)
     -r, --randd      Server is R&D server; do not email notify group and be more flexible with missing data.
     -q, --quiet      Run quietly without sending messages to STDOUT
-    -D, --DEBUG      Output debugging information
     -v, --version    Version Information
     -h, --help       Display the help information
 EOT
@@ -70,7 +74,6 @@ my $quiet = 0;
 my $outdir = '';
 my $case_num = '';
 my $r_and_d;
-my $debug = 0;
 
 GetOptions( "help|h"      => \$help,
             "version|v"   => \$verInfo,
@@ -81,7 +84,6 @@ GetOptions( "help|h"      => \$help,
             "dir|d=s"     => \$outdir,
             "case|c=s"    => \$case_num,
             "randd|r"     => \$r_and_d,
-            "DEBUG|D"     => \$debug,
         ) or do { print "\n$usage\n"; exit 1; };
 
 sub help {
@@ -117,11 +119,20 @@ if ( ! defined $resultsDir ) {
 }
 
 # Find out what TS version running in order to customize some downstream functions
-open( my $explog_fh, "<", "$resultsDir/explog.txt" ) || die "Can't open the explog.txt file for reading: $!";
-(my $ts_version) = map { /PGM SW Release:\s+(\d\.\d\.\d)$/ } <$explog_fh>;
+#open( my $explog_fh, "<", "$resultsDir/explog.txt" ) || die "Can't open the explog.txt file for reading: $!";
+#(my $ts_version) = map { /PGM SW Release:\s+(\d\.\d\.\d)$/ } <$explog_fh>;
+
+open( my $ver_fh, "<", "$resultsDir/version.txt" ) || die "ERROR: can not open the version.txt file for reading: $!";
+(my $ts_version) = map { /Torrent_Suite=(.*)/ } <$ver_fh>;
+close $ver_fh;
 
 # Setup custom and default output names
-my ( $run_name ) = $resultsDir =~ /Auto(?:_user)?_((?:[PM]CC|MC[12])-\d+.*_\d+)\/?$/;
+#my ( $run_name ) = $resultsDir =~ /Auto(?:_user)?_((?:[PM]CC|MC[12])-\d+.*_\d+)\/?$/;
+my ( $run_name ) = $resultsDir =~ /([MP]C[C123]-\d+.*_\d+)\/?$/;;
+
+print "run name: $run_name\n";
+exit;
+
 $output = "$run_name." . timestamp('date') if ( ! defined $output );
 
 my $destination_dir;
@@ -133,8 +144,8 @@ if ( ! -e $destination_dir ) {
 }
 
 # Create logfile for archive process
-my $logfile = "/var/log/mocha/archive.log";
-#my $logfile = "/home/ionadmin/testing.log";
+#my $logfile = "/var/log/mocha/archive.log";
+my $logfile = "/home/ionadmin/data_archive_test.log";
 open( my $log_fh, ">>", $logfile ) || die "Can't open the logfile '$logfile' for writing\n";
 
 # Direct script messages to either a logfile or both STDOUT and a logfile
@@ -197,23 +208,28 @@ if ( $extract ) {
 		push( @exportFileList, "collectedVariants/sampleKey.txt" );		
 	} else {
 		print "No sampleKey file located.  Creating a new one to include in export package.\n";
-        (my $major_version = $ts_version) =~ /(\d)\..*/;
 
-        if ( $major_version == 3 ) {
-            eval {
-                print "$info Using TSv3.2.1 sampleKeyGen scripts.\n";
-                system( "sampleKeyGen32 -o $resultsDir/sampleKey.txt /opt/mocha-tools/varCollector/resources/bcIndex.txt ${resultsDir}ion_params_00.json" );
-            };
-        } else {
-            print "$info Using TSv4.0.2 sampleKeyGen scripts.\n";
-            eval { system( "sampleKeyGen -o $resultsDir/sampleKey.txt" );
-            };
-        }
+        # TODO: remove the v3 stuff; too old to be supported any more.
+        #(my $major_version = $ts_version) =~ /(\d)\..*/;
+        #if ( $major_version == 3 ) {
+            #eval {
+                #print "$info Using TSv3.2.1 sampleKeyGen scripts.\n";
+                #system( "sampleKeyGen32 -o $resultsDir/sampleKey.txt /opt/mocha-tools/varCollector/resources/bcIndex.txt ${resultsDir}ion_params_00.json" );
+            #};
+        #} else {
+            #print "$info Using TSv4.0.2 sampleKeyGen scripts.\n";
+            #eval { system( "sampleKeyGen -o $resultsDir/sampleKey.txt" );
+            #};
+        #}
+        eval { system( "sampleKeyGen -o $resultsDir/sampleKey.txt" ) };
 		print "$err SampleKeyGen Script encountered errors: $@" if $@;
 		push( @exportFileList, "$resultsDir/sampleKey.txt" );
+
+        exit;
 		
 	}
-		if ( $debug ) {
+		#if ( $debug ) {
+		if ( DEBUG_OUTPUT ) {
             print "\n==============  DEBUG  ===============\n";
 			print "Contents of 'exportFileList':\n";
 			print "\t$_\n" for @exportFileList;
@@ -260,6 +276,8 @@ if ( $extract ) {
 
 # Run full archive on data.
 if ( $archive ) {
+
+    die colored( "Archiving is turned off for now\n\n", 'bold red on_black');
 
 	chdir( $resultsDir ) || die "Can not access the results directory selected: $resultsDir. $!";
 	my $archive_name = "$output.tar.gz";
@@ -323,7 +341,7 @@ if ( $archive ) {
 
     print $msg timestamp('timestamp') . " All data located.  Proceeding with archive creation\n"; 
 
-    if ( $debug ) {
+    if ( DEBUG_OUTPUT ) {
         print "\n==============  DEBUG  ===============\n";
         dd \@archivelist;
         print "======================================\n\n";
@@ -440,14 +458,15 @@ sub archive_data {
 	binmode( $pre_fh );
 	my $init_tarball_md5 = Digest::MD5->new->addfile($pre_fh)->hexdigest;
 	close( $pre_fh );
-    if ($debug) {
+    #if ($debug) {
+    if (DEBUG_OUTPUT) {
         print "\n==============  DEBUG  ===============\n";
         print "\tMD5 Hash = " . $init_tarball_md5 . "\n"; 
         print "======================================\n\n";
     }
 	print $msg timestamp('timestamp') . " Copying archive tarball to '$archive_dir'.\n"; 
 	
-    if ( $debug ) {
+    if ( DEBUG_OUTPUT ) {
         print "\n==============  DEBUG  ===============\n";
         print "\tpwd: $cwd\n";
         print "\tpath: $archive_dir\n";
@@ -471,7 +490,7 @@ sub archive_data {
 	my $post_tarball_md5 = Digest::MD5->new->addfile($post_fh)->hexdigest;
 	close( $post_fh );
 	
-    if ($debug) {
+    if (DEBUG_OUTPUT) {
         print "\n==============  DEBUG  ===============\n";
         print "\tMD5 Hash = " . $post_tarball_md5 . "\n"; 
         print "======================================\n\n";
@@ -575,7 +594,7 @@ sub create_archive_dir {
     my $case = shift;
     my $path = shift;
 
-    if ( $debug ) {
+    if ( DEBUG_OUTPUT ) {
         print "\n==============  DEBUG  ===============\n";
         print "\tCase No: $$case\n";
         print "\tPath: $$path\n";
@@ -623,7 +642,7 @@ sub send_mail {
         );
     }
 
-    if ( $debug ) {
+    if ( DEBUG_OUTPUT ) {
         print "============  DEBUG  ============\n";
         print "\tstatus: $status\n";
         print "\tcase: $$case\n";
