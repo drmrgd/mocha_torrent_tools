@@ -37,7 +37,7 @@ use constant LOG_OUT      => "$ENV{'HOME'}/datacollector_dev.log";
 print colored( "\n*******  DEVELOPMENT VERSION OF DATACOLLECTOR  *******\n\n", "bold yellow on_black");
 
 my $scriptname = basename($0);
-my $version = "v2.5.8_111914";
+my $version = "v2.5.9_111914";
 my $description = <<"EOT";
 Program to grab data from an Ion Torrent Run and either archive it, or create a directory that can be imported 
 to another analysis computer for processing.  
@@ -117,9 +117,10 @@ if ( ! defined $resultsDir ) {
 	exit 1;
 }
 
+# Get the absolute path of the target dir so that we can find it later.
+my $outdir_path = File::Spec->rel2abs($outdir) if $outdir;
+
 # Create logfile for archive process
-#my $logfile = "/var/log/mocha/archive.log";
-#my $logfile = "/home/ionadmin/data_archive_test.log";
 my $logfile = LOG_OUT;
 open( my $log_fh, ">>", $logfile ) || die "Can't open the logfile '$logfile' for writing\n";
 
@@ -194,7 +195,8 @@ elsif ($archive) {
 sub data_extract {
     # Run the export subroutine for pushing data to a different server
     
-    my $destination_dir = create_dest( $outdir, '/results/xfer/' );
+    #my $destination_dir = create_dest( $outdir, '/results/xfer/' );
+    my $destination_dir = create_dest( $outdir_path, '/results/xfer/' );
 
     print "Creating a copy of data in '$destination_dir from '$resultsDir' for export...\n";
     system( "mkdir -p $destination_dir/$output/sigproc_results/" );
@@ -265,7 +267,7 @@ sub data_archive {
     # Run full archive on data.
 
     # XXX
-    #chdir( $resultsDir ) || die "Can not access the results directory selected: $resultsDir. $!";
+    chdir( $resultsDir ) || die "Can not access the results directory selected: $resultsDir. $!";
     my $archive_name = "$output.tar.gz";
     print $msg timestamp('timestamp') . " $username has started archive on '$output'.\n";
     print $msg timestamp('timestamp') . " $info Running in R&D mode.\n" if $r_and_d;
@@ -339,15 +341,9 @@ sub create_dest {
     my $outdir = shift;
     my $default = shift;
 
-    # MARK
-    print "outdir => $outdir\n";
-    print "default  => $default\n";
-    exit;
-
     my $destination_dir;
-
-    #( $outdir ) ? ($destination_dir = $outdir) : ($destination_dir = '/results/xfer');
     ( $outdir ) ? ($destination_dir = $outdir) : ($destination_dir = $default);
+
     if ( ! -e $destination_dir ) {
         print "$warn The destination directory '$destination_dir' does not exist.\n";
         while (1) {
@@ -399,16 +395,14 @@ sub archive_data {
 	my $archivename = shift;
     
 	my $cwd = getcwd; 
-    my $dirpath = File::Spec->rel2abs($outdir);
     my $path;
 
     # XXX
-    ($outdir) ? ($path = $dirpath) : ($path = '/media/Aperio/');
-    my $destination_dir = create_dest( $outdir, $path ); 
-    exit;
+    my $destination_dir = create_dest( $outdir_path, '/media/Aperio/' ); 
 
     # Check the fileshare before we start
-    mount_check(\$path);
+    mount_check(\$destination_dir);
+    exit;
 
     # Create a archive subdirectory to put all data in.
     my $archive_dir;
@@ -559,12 +553,14 @@ sub mount_check {
     $$mount_point =~ s/\/$//; # Get rid of terminal forward slash to match mount info
 
     open ( my $mount_fh, "<", '/proc/mounts' ) || die "Can't open '/proc/mounts' for reading: $!";
-    if ( ! (grep { $_ =~ /$$mount_point/ } <$mount_fh>) && ! -e $$mount_point ) {
-		print $msg timestamp('timestamp') . " $err The remote fileshare or destination dir is not mounted! You must mount this share before proceeding\n";
-        halt(\$resultsDir);
-	} else {
-		print $msg timestamp('timestamp') . " The remote fileshare is mounted and accessible.\n";
-	}
+    if ( grep { /$$mount_point/ } <$mount_fh> ) {
+        print $msg timestamp('timestamp') . " The remote fileshare is mounted and accessible.\n";
+    } 
+    elsif ( -e $$mount_point && dirname($$mount_point) ne '/media' ) {
+        print $msg timestamp('timestamp') . " The remote fileshare is mounted and accessible.\n";
+    } else {
+        print $msg timestamp('timestamp') . " $err The remove fileshare is not mounted! You must mount this share before proceeding.\n";
+    }
 }
 
 sub process_md5_files {
