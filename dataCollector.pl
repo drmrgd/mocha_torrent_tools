@@ -36,7 +36,7 @@ use constant LOG_OUT      => "$ENV{'HOME'}/datacollector_dev.log";
 print colored( "\n*******  DEVELOPMENT VERSION OF DATACOLLECTOR  *******\n\n", "bold yellow on_black");
 
 my $scriptname = basename($0);
-my $version = "v2.5.5_111914";
+my $version = "v2.5.6_111914";
 my $description = <<"EOT";
 Program to grab data from an Ion Torrent Run and either archive it, or create a directory that can be imported 
 to another analysis computer for processing.  
@@ -165,8 +165,15 @@ my @archivelist = qw{
     pgm_logs.zip
 };
 
-# TODO: Clean up and make bottom part of funciton
-if ( ! defined $archive && ! defined $extract ) {
+# XXX
+if ($extract) {
+    data_extract();
+    exit;
+}
+elsif ($archive) {
+    data_archive();
+    exit;
+} else {
 	print "ERROR: You must choose archive (-a) or extract (-e) options when running this script\n\n";
 	print "$usage\n";
 	exit 1;
@@ -181,39 +188,15 @@ close $ver_fh;
 my ( $run_name ) = $resultsDir =~ /([MP]C[C123]-\d+.*_\d+)\/?$/;;
 $output = "$run_name." . timestamp('date') if ( ! defined $output );
 
-my $destination_dir;
-( $outdir ) ? ($destination_dir = $outdir) : ($destination_dir = '/results/xfer');
-if ( ! -e $destination_dir ) {
-    #print "ERROR: The destination directory '$destination_dir' does exist.  Check the path.\n";
-    #exit 1;
-    print "$warn The destination directory '$destination_dir' does not exist.\n";
-    while (1) {
-        print "(c)reate, (n)ew directory, (q)uit: ";
-        chomp( my $resp = <STDIN> );
-        if ( $resp !~  /[cnq]/ ) {
-            print "$err Not a valid response.\n";
-        }
-        elsif ( $resp eq 'c' ) {
-            print "Creating the directory '$destination_dir'...\n";
-            mkdir $destination_dir;
-            last;
-        }
-        elsif( $resp eq 'n' ) {
-            print "New target dir: ";
-            chomp( $destination_dir = <STDIN>);
-            print "New location selected: $destination_dir. Creating the new directory\n";
-            mkdir $destination_dir;
-            last;
-        } else {
-            print "Exiting.\n";
-            exit 1;
-        }
-    }
-}
-
 
 sub data_extract {
     # Just run the export subroutine for pushing data to a different server
+    
+    my $destination_dir = create_dest( $outdir, '/results/xfer/' );
+
+    print "dest  => $destination_dir\n";
+    exit;
+
     print "Creating a copy of data in '$destination_dir from '$resultsDir' for export...\n";
     system( "mkdir -p $destination_dir/$output/sigproc_results/" );
     my $sigproc_out = "$destination_dir/$output/sigproc_results/";
@@ -364,6 +347,43 @@ sub data_archive {
     }
 }
 
+sub create_dest {
+    # Create a place to put the data.
+    my $outdir = shift;
+    my $default = shift;
+
+    my $destination_dir;
+
+    #( $outdir ) ? ($destination_dir = $outdir) : ($destination_dir = '/results/xfer');
+    ( $outdir ) ? ($destination_dir = $outdir) : ($destination_dir = $default);
+    if ( ! -e $destination_dir ) {
+        print "$warn The destination directory '$destination_dir' does not exist.\n";
+        while (1) {
+            print "(c)reate, (n)ew directory, (q)uit: ";
+            chomp( my $resp = <STDIN> );
+            if ( $resp !~  /[cnq]/ ) {
+                print "$err Not a valid response.\n";
+            }
+            elsif ( $resp eq 'c' ) {
+                print "Creating the directory '$destination_dir'...\n";
+                mkdir $destination_dir;
+                last;
+            }
+            elsif( $resp eq 'n' ) {
+                print "New target dir: ";
+                chomp( $destination_dir = <STDIN>);
+                print "New location selected: $destination_dir. Creating the new directory\n";
+                mkdir $destination_dir;
+                last;
+            } else {
+                print "Exiting.\n";
+                exit 1;
+            }
+        }
+    }
+    return $destination_dir;
+}
+
 sub remove_file {
     # remove file from extract or archive list; called too many times to not have subroutine!
     my $file = shift;
@@ -385,9 +405,14 @@ sub copy_data {
 sub archive_data {
 	my $filelist = shift;
 	my $archivename = shift;
+    
 	my $cwd = getcwd;
 	my $path;
-    ($outdir) ? ($path = $destination_dir) : ($path = '/media/Aperio/');
+
+    # XXX
+    my $destination_dir = create_dest( $outdir, '/media/Aperio/' );
+
+    #($outdir) ? ($path = $destination_dir) : ($path = '/media/Aperio/');
 
     # Check the fileshare before we start
     mount_check(\$path);
