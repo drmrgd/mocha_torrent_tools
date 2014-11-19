@@ -31,11 +31,11 @@ use Data::Dump;
 
 use constant DEBUG_OUTPUT => 1;
 
-#print colored( "*******  DEVELOPMENT VERSION OF DATACOLLECTOR  *******\n\n", "bold red on_black");
-print "*******  DEVELOPMENT VERSION OF DATACOLLECTOR  *******\n\n";
+# TODO: Remove label.
+print colored( "\n*******  DEVELOPMENT VERSION OF DATACOLLECTOR  *******\n\n", "bold yellow on_black");
 
 my $scriptname = basename($0);
-my $version = "v2.5.2_111814";
+my $version = "v2.5.4_111914";
 my $description = <<"EOT";
 Program to grab data from an Ion Torrent Run and either archive it, or create a directory that can be imported 
 to another analysis computer for processing.  
@@ -176,6 +176,7 @@ my @exportFileList = qw{
 	sigproc_results/avgNukeTrace_TCAG.txt
 	explog.txt
     explog_final.txt
+    version.txt
 };
 
 my @archivelist = qw{ 
@@ -191,68 +192,45 @@ if ( $extract ) {
 	print "Creating a copy of data in '$destination_dir from '$resultsDir' for export...\n";
 	system( "mkdir -p $destination_dir/$output/sigproc_results/" );
 	my $sigproc_out = "$destination_dir/$output/sigproc_results/";
-	
-    #if ( -f "$resultsDir/plugin_out/varCollector_out/sampleKey.txt" ) {
-        #print "Sample key file located in varCollector plugin data. Adding to export data package.\n";
-        #push( @exportFileList, "plugin_out/varCollector_out/sampleKey.txt" );
-    #}
-    #elsif ( -f "$resultsDir/collectedVariants/sampleKey.txt" ) {
-		#print "SampleKey file located in 'collectedVariants/'.  Adding to export data package.\n";
-		#push( @exportFileList, "collectedVariants/sampleKey.txt" );		
-	#} else {
-		#print "No sampleKey file located.  Creating a new one to include in export package.\n";
 
-        # TODO: remove the v3 stuff; too old to be supported any more.
-        #(my $major_version = $ts_version) =~ /(\d)\..*/;
-        #if ( $major_version == 3 ) {
-            #eval {
-                #print "$info Using TSv3.2.1 sampleKeyGen scripts.\n";
-                #system( "sampleKeyGen32 -o $resultsDir/sampleKey.txt /opt/mocha-tools/varCollector/resources/bcIndex.txt ${resultsDir}ion_params_00.json" );
-            #};
-        #} else {
-            #print "$info Using TSv4.0.2 sampleKeyGen scripts.\n";
-            #eval { system( "sampleKeyGen -o $resultsDir/sampleKey.txt" );
-            #};
-        #}
-
-        # XXX: Fix sample key file generation.  Either not in right dir to find JSON or not writing the sampleKey
-        # Always make a smaple key...why mess around?
-        print "Generating a sampleKey.txt file for the export package...\n";
-        eval { system( "cd $resultsDir && sampleKeyGen -o sampleKey.txt" ) };
-        if ($@) {
-            print "$err SampleKeyGen Script encountered errors: $@\n";
-            exit;
-        }
-		push( @exportFileList, "$resultsDir/sampleKey.txt" );
-
-        print "DEBUG: cwd is" . cwd() . "\n";
-
+    # Generate a sampleKey.txt file for the package
+    print "Generating a sampleKey.txt file for the export package...\n";
+    eval { system( "cd $resultsDir && sampleKeyGen -o sampleKey.txt" ) };
+    if ($@) {
+        print "$err SampleKeyGen Script encountered errors: $@\n";
         exit;
-		
-	#}
-		#if ( $debug ) {
-		if ( DEBUG_OUTPUT ) {
-            print "\n==============  DEBUG  ===============\n";
-			print "Contents of 'exportFileList':\n";
-			print "\t$_\n" for @exportFileList;
-            print "======================================\n\n";
-		}
+    }
+    push( @exportFileList, "sampleKey.txt" );
+
+    # Looks like location of Bead_density files has moved in 4.2.1.
+    if ($ts_version eq '4.2.1') {
+        print "Modifying path for Bead_density_data...\n";
+        map { (/Bead/) ? ($_ = basename($_)) : $_ } @exportFileList;
+    }
 
 	# Add 'analysis_return_code' file to be compatible with TSv3.4+
 	if ( ! -e "sigproc_results/analysis_return_code.txt" ) {
 		print "No analysis_return_code.txt file found.  Creating one to be compatible with TSv3.4+\n";
 		my $arc_file = "$sigproc_out/analysis_return_code.txt";
-		open( OUT, ">", $arc_file ) || die "Can't created an analysis_return_code.txt file in '$sigproc_out: $!";
-		print OUT "0";
-		close( OUT );
+		open( my $arc_fh, ">", $arc_file ) || die "Can't created an analysis_return_code.txt file in '$sigproc_out: $!";
+		print $arc_fh "0";
+		close $arc_fh;
 	} else {
 		print "Found analysis_return_code.txt file and adding to the export filelist\n";
 		push( @exportFileList, "$sigproc_out/analysis_return_code.txt" );
 	}
 
+    if ( DEBUG_OUTPUT ) {
+        print "\n==============  DEBUG  ===============\n";
+        print "Contents of 'exportFileList':\n";
+        print "\t$_\n" for @exportFileList;
+        print "======================================\n\n";
+    }
+
 	# Copy run data for re-analysis
 	for ( @exportFileList ) {
-		if ( /explog.*\.txt/ or /sampleKey\.txt/ ) {
+		#if ( /explog.*\.txt/ or /sampleKey\.txt/ ) {
+        if ( ! /^sigproc/ && ! /^Bead/ ) {
 			copy_data( "$resultsDir/$_", "$destination_dir/$output" );
 		} else {
 			copy_data( "$resultsDir/$_", "$sigproc_out" );
