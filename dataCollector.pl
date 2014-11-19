@@ -24,6 +24,7 @@ use POSIX qw(strftime);
 use Text::Wrap;
 use Term::ANSIColor;
 use Cwd;
+use File::Spec;
 use Digest::MD5;
 use File::Path qw(remove_tree);
 use Getopt::Long qw(:config bundling auto_abbrev no_ignore_case);
@@ -36,7 +37,7 @@ use constant LOG_OUT      => "$ENV{'HOME'}/datacollector_dev.log";
 print colored( "\n*******  DEVELOPMENT VERSION OF DATACOLLECTOR  *******\n\n", "bold yellow on_black");
 
 my $scriptname = basename($0);
-my $version = "v2.5.6_111914";
+my $version = "v2.5.8_111914";
 my $description = <<"EOT";
 Program to grab data from an Ion Torrent Run and either archive it, or create a directory that can be imported 
 to another analysis computer for processing.  
@@ -58,6 +59,7 @@ USAGE: $scriptname [options] [-a | -e] <results dir>
     -a, --archive    Create tarball archive of the run data
     -e, --extract    Extract the data for re-analysis on another computer.
     -c, --case       Case number to use for new directory generation
+    -O, --OCP        Run is from OCP; Variant calling data on IR / MATCHbox, don't include in archive.
     -o, --output     Custom output file name.  (DEFAULT: 'run_name.mmddyyy')
     -d, --dir        Custom output / destination  directory (DEFAULT: /results/xfer/ for extract and /media/Aperio for archive)
     -r, --randd      Server is R&D server; do not email notify group and be more flexible with missing data.
@@ -75,6 +77,7 @@ my $quiet = 0;
 my $outdir = '';
 my $case_num = '';
 my $r_and_d;
+my $ocp_run;
 
 GetOptions( "help|h"      => \$help,
             "version|v"   => \$verInfo,
@@ -85,6 +88,7 @@ GetOptions( "help|h"      => \$help,
             "dir|d=s"     => \$outdir,
             "case|c=s"    => \$case_num,
             "randd|r"     => \$r_and_d,
+            "OCP|O"       => \$ocp_run,
         ) or do { print "\n$usage\n"; exit 1; };
 
 sub help {
@@ -159,11 +163,19 @@ my @exportFileList = qw{
 
 my @archivelist = qw{ 
 	ion_params_00.json
-	collectedVariants
     basecaller_results/datasets_basecaller.json
     basecaller_results/datasets_pipeline.json
     pgm_logs.zip
 };
+
+# Find out what TS version running in order to customize some downstream functions
+open( my $ver_fh, "<", "$resultsDir/version.txt" ) || die "ERROR: can not open the version.txt file for reading: $!";
+(my $ts_version) = map { /Torrent_Suite=(.*)/ } <$ver_fh>;
+close $ver_fh;
+
+# Setup custom and default output names
+my ( $run_name ) = $resultsDir =~ /([MP]C[C123]-\d+.*_\d+)\/?$/;;
+$output = "$run_name." . timestamp('date') if ( ! defined $output );
 
 # XXX
 if ($extract) {
@@ -179,23 +191,10 @@ elsif ($archive) {
 	exit 1;
 }
 
-# Find out what TS version running in order to customize some downstream functions
-open( my $ver_fh, "<", "$resultsDir/version.txt" ) || die "ERROR: can not open the version.txt file for reading: $!";
-(my $ts_version) = map { /Torrent_Suite=(.*)/ } <$ver_fh>;
-close $ver_fh;
-
-# Setup custom and default output names
-my ( $run_name ) = $resultsDir =~ /([MP]C[C123]-\d+.*_\d+)\/?$/;;
-$output = "$run_name." . timestamp('date') if ( ! defined $output );
-
-
 sub data_extract {
-    # Just run the export subroutine for pushing data to a different server
+    # Run the export subroutine for pushing data to a different server
     
     my $destination_dir = create_dest( $outdir, '/results/xfer/' );
-
-    print "dest  => $destination_dir\n";
-    exit;
 
     print "Creating a copy of data in '$destination_dir from '$resultsDir' for export...\n";
     system( "mkdir -p $destination_dir/$output/sigproc_results/" );
@@ -212,7 +211,7 @@ sub data_extract {
 
     # Looks like location of Bead_density files has moved in 4.2.1.
     if ($ts_version eq '4.2.1') {
-        print "Modifying path for Bead_density_data...\n";
+        print "Modifying path for Bead_density_data for 4.2.1+ runs...\n";
         map { (/Bead/) ? ($_ = basename($_)) : $_ } @exportFileList;
     }
 
@@ -265,21 +264,19 @@ sub data_extract {
 sub data_archive {
     # Run full archive on data.
 
-    die colored( "Archiving is turned off for now\n\n", 'bold red on_black');
-
-    chdir( $resultsDir ) || die "Can not access the results directory selected: $resultsDir. $!";
+    # XXX
+    #chdir( $resultsDir ) || die "Can not access the results directory selected: $resultsDir. $!";
     my $archive_name = "$output.tar.gz";
     print $msg timestamp('timestamp') . " $username has started archive on '$output'.\n";
     print $msg timestamp('timestamp') . " $info Running in R&D mode.\n" if $r_and_d;
     
     # Add in extra BAM files and such
     my @data = grep { -f } glob( '*.barcode.bam.zip *.support.zip' );
-    #my @plugins = grep { -d } glob( 'plugin_out/AmpliconCoveragePlots* plugin_out/variantCaller* plugin_out/varCollector* plugin_out/AmpliconCoverageAnalysis*' );
-
     my @plugins = qw( plugin_out/AmpliconCoveragePlots_out
                       plugin_out/variantCaller_out 
                       plugin_out/varCollector_out 
                       plugin_out/AmpliconCoverageAnalysis_out
+                      plugin_out/CoverageAnalysis_out
                     );
     push( @archivelist, $_ ) for @data;
     push( @archivelist, $_ ) for @exportFileList;
@@ -290,12 +287,8 @@ sub data_archive {
         print $msg timestamp('timestamp') . " $warn explog_final is not present; may be deleted due to data archiving. Skipping.\n";
         remove_file( "explog_final.txt", \@archivelist );
     } 
-    if ( ! -e "collectedVariants" ) {
-        print $msg timestamp('timestamp') . " $info CollectedVariants directory is not present. Skipping.\n";
-        remove_file( "collectedVariants", \@archivelist );
-    } 
     if ( ! -d "plugin_out/variantCaller_out/" ) {
-        if ( $r_and_d ) {
+        if ( $r_and_d || $ocp_run ) {
             print $msg timestamp('timestamp') . " $warn No TVC results directory.  Skipping.\n";
             remove_file( "plugin_out/variantCaller_out", \@archivelist );
         } else {
@@ -308,7 +301,7 @@ sub data_archive {
         remove_file( "plugin_out/AmpliconCoveragePlots_out", \@archivelist );
     }
     if ( ! -d "plugin_out/varCollector_out/" ) {
-        if ( $r_and_d ) {
+        if ( $r_and_d || $ocp_run ) {
             print $msg timestamp('timestamp') . " $warn No varCollector plugin data. Skipping.\n";
             remove_file( "plugin_out/varCollector_out", \@archivelist );
         } else {
@@ -320,12 +313,6 @@ sub data_archive {
         print $msg timestamp('timestamp') . " $warn AmpliconCoverageAnalysis is missing. Data may be prior to implementation.\n";
         remove_file( "plugin_out/AmpliconCoverageAnalysis_out", \@archivelist );
     }
-    #if ( ! grep { /basecaller_results\/datasets_(basecaller|pipeline)\.json/ } @archivelist ) {
-    if ( ! -e glob( "basecaller_results/datasets*" ) ) {
-        print $msg timestamp('timestamp') . " $info No 'datasets_basecaller.json' or 'datasets_pipeline.json' files found.  Data may be prior to TSv4.0 implementation.\n";
-        remove_file( "basecaller_results/datasets_basecaller.json", \@archivelist );
-        remove_file( "basecaller_results/datasets_pipeline.json", \@archivelist );
-    } 
 
     print $msg timestamp('timestamp') . " All data located.  Proceeding with archive creation\n"; 
 
@@ -339,7 +326,7 @@ sub data_archive {
     if ( archive_data( \@archivelist, $archive_name ) == 1 ) {
         print $msg timestamp('timestamp') . " Archival of experiment '$output' completed successfully\n\n";
         print "Experiment archive completed successfully\n" if $quiet == 1;
-        send_mail( "success", \$resultsDir, \$case_num );
+        #send_mail( "success", \$resultsDir, \$case_num );
     } else {
         print $msg timestamp('timestamp') . " $err Archive creation failed for '$output'.  Check the logfiles for details\n\n";
         print "$err Archive creation failed for '$output'. Check /var/log/mocha/archive.log for details\n\n" if $quiet == 1;
@@ -351,6 +338,11 @@ sub create_dest {
     # Create a place to put the data.
     my $outdir = shift;
     my $default = shift;
+
+    # MARK
+    print "outdir => $outdir\n";
+    print "default  => $default\n";
+    exit;
 
     my $destination_dir;
 
@@ -406,13 +398,14 @@ sub archive_data {
 	my $filelist = shift;
 	my $archivename = shift;
     
-	my $cwd = getcwd;
-	my $path;
+	my $cwd = getcwd; 
+    my $dirpath = File::Spec->rel2abs($outdir);
+    my $path;
 
     # XXX
-    my $destination_dir = create_dest( $outdir, '/media/Aperio/' );
-
-    #($outdir) ? ($path = $destination_dir) : ($path = '/media/Aperio/');
+    ($outdir) ? ($path = $dirpath) : ($path = '/media/Aperio/');
+    my $destination_dir = create_dest( $outdir, $path ); 
+    exit;
 
     # Check the fileshare before we start
     mount_check(\$path);
