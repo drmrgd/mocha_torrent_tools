@@ -37,7 +37,7 @@ use constant LOG_OUT      => "$ENV{'HOME'}/datacollector_dev.log";
 print colored( "\n*******  DEVELOPMENT VERSION OF DATACOLLECTOR  *******\n\n", "bold yellow on_black");
 
 my $scriptname = basename($0);
-my $version = "v2.5.9_111914";
+my $version = "v2.6.0_111914";
 my $description = <<"EOT";
 Program to grab data from an Ion Torrent Run and either archive it, or create a directory that can be imported 
 to another analysis computer for processing.  
@@ -174,6 +174,12 @@ open( my $ver_fh, "<", "$resultsDir/version.txt" ) || die "ERROR: can not open t
 (my $ts_version) = map { /Torrent_Suite=(.*)/ } <$ver_fh>;
 close $ver_fh;
 
+# Looks like location of Bead_density files has moved in 4.2.1.
+if ($ts_version eq '4.2.1') {
+    print "Modifying path for Bead_density_data for 4.2.1+ runs...\n";
+    map { (/Bead/) ? ($_ = basename($_)) : $_ } @exportFileList;
+}
+
 # Setup custom and default output names
 my ( $run_name ) = $resultsDir =~ /([MP]C[C123]-\d+.*_\d+)\/?$/;;
 $output = "$run_name." . timestamp('date') if ( ! defined $output );
@@ -210,12 +216,6 @@ sub data_extract {
         exit;
     }
     push( @exportFileList, "sampleKey.txt" );
-
-    # Looks like location of Bead_density files has moved in 4.2.1.
-    if ($ts_version eq '4.2.1') {
-        print "Modifying path for Bead_density_data for 4.2.1+ runs...\n";
-        map { (/Bead/) ? ($_ = basename($_)) : $_ } @exportFileList;
-    }
 
     # Add 'analysis_return_code' file to be compatible with TSv3.4+
     if ( ! -e "sigproc_results/analysis_return_code.txt" ) {
@@ -316,6 +316,10 @@ sub data_archive {
         remove_file( "plugin_out/AmpliconCoverageAnalysis_out", \@archivelist );
     }
 
+    if ( ! -d "plugin_out/CoverageAnalysis_out/" ) {
+        print $msg timestamp('timestamp') . " $warn CoverageAnalysis Plugin data missing. OK for now....\n";
+        remove_file( "plugin_out/CoverageAnalysis_out", \@archivelist );
+    }
     print $msg timestamp('timestamp') . " All data located.  Proceeding with archive creation\n"; 
 
     if ( DEBUG_OUTPUT ) {
@@ -328,7 +332,7 @@ sub data_archive {
     if ( archive_data( \@archivelist, $archive_name ) == 1 ) {
         print $msg timestamp('timestamp') . " Archival of experiment '$output' completed successfully\n\n";
         print "Experiment archive completed successfully\n" if $quiet == 1;
-        #send_mail( "success", \$resultsDir, \$case_num );
+        send_mail( "success", \$resultsDir, \$case_num );
     } else {
         print $msg timestamp('timestamp') . " $err Archive creation failed for '$output'.  Check the logfiles for details\n\n";
         print "$err Archive creation failed for '$output'. Check /var/log/mocha/archive.log for details\n\n" if $quiet == 1;
@@ -395,21 +399,20 @@ sub archive_data {
 	my $archivename = shift;
     
 	my $cwd = getcwd; 
-    my $path;
+    #my $path;
 
     # XXX
     my $destination_dir = create_dest( $outdir_path, '/media/Aperio/' ); 
 
     # Check the fileshare before we start
     mount_check(\$destination_dir);
-    exit;
 
     # Create a archive subdirectory to put all data in.
     my $archive_dir;
     if ( $case_num ) {
-        $archive_dir = create_archive_dir( \$case_num, \$path );
+        $archive_dir = create_archive_dir( \$case_num, \$destination_dir);
     } else {
-        $archive_dir = $path;
+        $archive_dir = $destination_dir;
     }
     
 	# Create a checksum file for all of the files in the archive and add it to the tarball 
@@ -426,7 +429,6 @@ sub archive_data {
 	# Use two step tar process with 'pigz' multicore gzip utility to speed things up a bit. 
 	if ( system( "tar -cf - @$filelist | pigz -9 -p 8 > $archivename" ) != 0 ) {
 		print $msg timestamp('timestamp') . " $err Tarball creation failed: $?.\n"; 
-		#return 0;	
         halt( \$resultsDir );
 	} else {
 		print $msg timestamp('timestamp') . " $info Tarball creation was successful.\n";
@@ -455,6 +457,7 @@ sub archive_data {
 	if ( $? == 0 ) {
 		print $msg timestamp('timestamp') . " The archive is intact and not corrupt\n";
 		chdir( $cwd ) || die "Can't change directory to '$cwd': $!";
+        print $msg timestamp('timestamp') . " Removing the tmp data\n";
 		remove_tree( $tmpdir );
 	} 
 	elsif ( $? == 1 ) {
@@ -490,7 +493,6 @@ sub archive_data {
         print "======================================\n\n";
     }
 
-	#if ( copy( $archivename, $path ) == 0 ) {
 	if ( copy( $archivename, $archive_dir ) == 0 ) {
 		print $msg timestamp('timestamp') . " Copying archive to storage device: $!.\n"; 
 		return 0;
@@ -521,7 +523,6 @@ sub archive_data {
 		print $msg timestamp('timestamp') . " $info The md5sum for the archive is in agreement. The local copy will now be deleted.\n";
 		unlink( $archivename );
 	}
-
 	return 1;
 }
 
@@ -588,9 +589,13 @@ sub md5sum {
 	# Generate an md5sum for a file and write to a textfile
 	my $file = shift;
 
+    if ( DEBUG_OUTPUT ) {
+        print "\n==============  DEBUG  ===============\n";
+        print "\tProcessing file: $file\n";
+        print "======================================\n\n";
+    }
 	my $md5_list = "md5sum.txt";
 	open( my $md5_fh, ">>", $md5_list ) || die "Can't open the md5sum.txt file for writing: $!";
-
 	eval {
 		open( my $input_fh, "<", $file ) || die "Can't open the input file '$file': $!";
 		binmode( $input_fh );
@@ -601,9 +606,13 @@ sub md5sum {
 		close( $input_fh );
 	};
 
+    print "ret code: $@\n";
+
 	if ( $@ ) {
 		print $msg timestamp('timestamp') . " $@\n";
-		return 0;
+		#return 0;
+        # Call a halt for now
+        halt(\$resultsDir);
 	}
 }
 
@@ -651,15 +660,18 @@ sub send_mail {
     $$expt_name =~ s/\/$//;
     my $template_path = "/home/ionadmin/templates/email/";
     my $target = 'simsdj@mail.nih.gov';
-    if ( $r_and_d ) {
-        @additional_recipients = '';
-    } else {
-        @additional_recipients = qw( 
-        harringtonrd@mail.nih.gov
-        vivekananda.datta@nih.gov
-        patricia.runge@nih.gov
-        );
-    }
+    
+    # TODO: uncomment this
+    @additional_recipients = '';
+    #if ( $r_and_d ) {
+        #@additional_recipients = '';
+    #} else {
+        #@additional_recipients = qw( 
+        #harringtonrd@mail.nih.gov
+        #vivekananda.datta@nih.gov
+        #patricia.runge@nih.gov
+        #);
+    #}
 
     if ( DEBUG_OUTPUT ) {
         print "============  DEBUG  ============\n";
@@ -668,7 +680,6 @@ sub send_mail {
         print "\tname: $$expt_name\n";
         print "=================================\n";
     }
-    
     
     my ($msg, $cc_list);
     if ( $status eq 'success' ) {
