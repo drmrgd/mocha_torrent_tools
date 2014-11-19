@@ -30,12 +30,13 @@ use Getopt::Long qw(:config bundling auto_abbrev no_ignore_case);
 use Data::Dump;
 
 use constant DEBUG_OUTPUT => 1;
+use constant LOG_OUT      => "$ENV{'HOME'}/datacollector_dev.log";
 
 # TODO: Remove label.
 print colored( "\n*******  DEVELOPMENT VERSION OF DATACOLLECTOR  *******\n\n", "bold yellow on_black");
 
 my $scriptname = basename($0);
-my $version = "v2.5.4_111914";
+my $version = "v2.5.5_111914";
 my $description = <<"EOT";
 Program to grab data from an Ion Torrent Run and either archive it, or create a directory that can be imported 
 to another analysis computer for processing.  
@@ -101,12 +102,6 @@ version_info if $verInfo;
 
 my $username = $ENV{'USER'};
 
-if ( ! defined $archive && ! defined $extract ) {
-	print "ERROR: You must choose archive (-a) or extract (-e) options when running this script\n\n";
-	print "$usage\n";
-	exit 1;
-}
-
 # Make sure that there is an appropriate Results Dir sent to script
 my $resultsDir = shift @ARGV;
 if ( ! defined $resultsDir ) {
@@ -118,27 +113,10 @@ if ( ! defined $resultsDir ) {
 	exit 1;
 }
 
-# Find out what TS version running in order to customize some downstream functions
-open( my $ver_fh, "<", "$resultsDir/version.txt" ) || die "ERROR: can not open the version.txt file for reading: $!";
-(my $ts_version) = map { /Torrent_Suite=(.*)/ } <$ver_fh>;
-close $ver_fh;
-
-# Setup custom and default output names
-#my ( $run_name ) = $resultsDir =~ /Auto(?:_user)?_((?:[PM]CC|MC[12])-\d+.*_\d+)\/?$/;
-my ( $run_name ) = $resultsDir =~ /([MP]C[C123]-\d+.*_\d+)\/?$/;;
-$output = "$run_name." . timestamp('date') if ( ! defined $output );
-
-my $destination_dir;
-( $outdir ) ? ($destination_dir = $outdir) : ($destination_dir = '/results/xfer');
-
-if ( ! -e $destination_dir ) {
-    print "ERROR: The destination directory '$destination_dir' does exist.  Check the path.\n";
-    exit 1;
-}
-
 # Create logfile for archive process
 #my $logfile = "/var/log/mocha/archive.log";
-my $logfile = "/home/ionadmin/data_archive_test.log";
+#my $logfile = "/home/ionadmin/data_archive_test.log";
+my $logfile = LOG_OUT;
 open( my $log_fh, ">>", $logfile ) || die "Can't open the logfile '$logfile' for writing\n";
 
 # Direct script messages to either a logfile or both STDOUT and a logfile
@@ -146,16 +124,16 @@ my $msg;
 $msg = IO::Tee->new( \*STDOUT, $log_fh ) if $quiet == 0;
 
 if ( $quiet == 1 ) {
-	print "Running script in quiet mode. Check the log in /var/log/mocha/archive_log.txt for details\n";
+	print "Running script in quiet mode. Check the log in " . LOG_OUT ." for details\n";
 	$msg = $log_fh;
 }
 
 # Format the logfile output
 $Text::Wrap::columns = 123;
 my $space = ' ' x ( length( timestamp('timestamp') ) + 3 );
-my $warn = colored("WARN:", 'bold yellow on_black');
-my $info = colored("INFO:", 'bold green on_black');
-my $err = colored("ERROR:", 'bold red on_black');
+my $warn =  colored("WARN:", 'bold yellow on_black');
+my $info =  colored("INFO:", 'bold green on_black');
+my $err =   colored("ERROR:", 'bold red on_black');
 
 ##----------------------------------------- End Command Arg Parsing ------------------------------------##
 
@@ -187,11 +165,58 @@ my @archivelist = qw{
     pgm_logs.zip
 };
 
-# Just run the export subroutine for pushing data to a different server
-if ( $extract ) {
-	print "Creating a copy of data in '$destination_dir from '$resultsDir' for export...\n";
-	system( "mkdir -p $destination_dir/$output/sigproc_results/" );
-	my $sigproc_out = "$destination_dir/$output/sigproc_results/";
+# TODO: Clean up and make bottom part of funciton
+if ( ! defined $archive && ! defined $extract ) {
+	print "ERROR: You must choose archive (-a) or extract (-e) options when running this script\n\n";
+	print "$usage\n";
+	exit 1;
+}
+
+# Find out what TS version running in order to customize some downstream functions
+open( my $ver_fh, "<", "$resultsDir/version.txt" ) || die "ERROR: can not open the version.txt file for reading: $!";
+(my $ts_version) = map { /Torrent_Suite=(.*)/ } <$ver_fh>;
+close $ver_fh;
+
+# Setup custom and default output names
+my ( $run_name ) = $resultsDir =~ /([MP]C[C123]-\d+.*_\d+)\/?$/;;
+$output = "$run_name." . timestamp('date') if ( ! defined $output );
+
+my $destination_dir;
+( $outdir ) ? ($destination_dir = $outdir) : ($destination_dir = '/results/xfer');
+if ( ! -e $destination_dir ) {
+    #print "ERROR: The destination directory '$destination_dir' does exist.  Check the path.\n";
+    #exit 1;
+    print "$warn The destination directory '$destination_dir' does not exist.\n";
+    while (1) {
+        print "(c)reate, (n)ew directory, (q)uit: ";
+        chomp( my $resp = <STDIN> );
+        if ( $resp !~  /[cnq]/ ) {
+            print "$err Not a valid response.\n";
+        }
+        elsif ( $resp eq 'c' ) {
+            print "Creating the directory '$destination_dir'...\n";
+            mkdir $destination_dir;
+            last;
+        }
+        elsif( $resp eq 'n' ) {
+            print "New target dir: ";
+            chomp( $destination_dir = <STDIN>);
+            print "New location selected: $destination_dir. Creating the new directory\n";
+            mkdir $destination_dir;
+            last;
+        } else {
+            print "Exiting.\n";
+            exit 1;
+        }
+    }
+}
+
+
+sub data_extract {
+    # Just run the export subroutine for pushing data to a different server
+    print "Creating a copy of data in '$destination_dir from '$resultsDir' for export...\n";
+    system( "mkdir -p $destination_dir/$output/sigproc_results/" );
+    my $sigproc_out = "$destination_dir/$output/sigproc_results/";
 
     # Generate a sampleKey.txt file for the package
     print "Generating a sampleKey.txt file for the export package...\n";
@@ -208,17 +233,17 @@ if ( $extract ) {
         map { (/Bead/) ? ($_ = basename($_)) : $_ } @exportFileList;
     }
 
-	# Add 'analysis_return_code' file to be compatible with TSv3.4+
-	if ( ! -e "sigproc_results/analysis_return_code.txt" ) {
-		print "No analysis_return_code.txt file found.  Creating one to be compatible with TSv3.4+\n";
-		my $arc_file = "$sigproc_out/analysis_return_code.txt";
-		open( my $arc_fh, ">", $arc_file ) || die "Can't created an analysis_return_code.txt file in '$sigproc_out: $!";
-		print $arc_fh "0";
-		close $arc_fh;
-	} else {
-		print "Found analysis_return_code.txt file and adding to the export filelist\n";
-		push( @exportFileList, "$sigproc_out/analysis_return_code.txt" );
-	}
+    # Add 'analysis_return_code' file to be compatible with TSv3.4+
+    if ( ! -e "sigproc_results/analysis_return_code.txt" ) {
+        print "No analysis_return_code.txt file found.  Creating one to be compatible with TSv3.4+\n";
+        my $arc_file = "$sigproc_out/analysis_return_code.txt";
+        open( my $arc_fh, ">", $arc_file ) || die "Can't created an analysis_return_code.txt file in '$sigproc_out: $!";
+        print $arc_fh "0";
+        close $arc_fh;
+    } else {
+        print "Found analysis_return_code.txt file and adding to the export filelist\n";
+        push( @exportFileList, "$sigproc_out/analysis_return_code.txt" );
+    }
 
     if ( DEBUG_OUTPUT ) {
         print "\n==============  DEBUG  ===============\n";
@@ -227,15 +252,15 @@ if ( $extract ) {
         print "======================================\n\n";
     }
 
-	# Copy run data for re-analysis
-	for ( @exportFileList ) {
-		#if ( /explog.*\.txt/ or /sampleKey\.txt/ ) {
+    # Copy run data for re-analysis
+    for ( @exportFileList ) {
+        #if ( /explog.*\.txt/ or /sampleKey\.txt/ ) {
         if ( ! /^sigproc/ && ! /^Bead/ ) {
-			copy_data( "$resultsDir/$_", "$destination_dir/$output" );
-		} else {
-			copy_data( "$resultsDir/$_", "$sigproc_out" );
-		}
-	}
+            copy_data( "$resultsDir/$_", "$destination_dir/$output" );
+        } else {
+            copy_data( "$resultsDir/$_", "$sigproc_out" );
+        }
+    }
 
     # Create tarball of results to make net transfer easier.
     chdir( $destination_dir );
@@ -251,33 +276,33 @@ if ( $extract ) {
         remove_tree( $output );
     }
 
-	print "Finished copying data package for export.  Data ready in '$destination_dir'\n";
+    print "Finished copying data package for export.  Data ready in '$destination_dir'\n";
 }
 
-# Run full archive on data.
-if ( $archive ) {
+sub data_archive {
+    # Run full archive on data.
 
     die colored( "Archiving is turned off for now\n\n", 'bold red on_black');
 
-	chdir( $resultsDir ) || die "Can not access the results directory selected: $resultsDir. $!";
-	my $archive_name = "$output.tar.gz";
-	print $msg timestamp('timestamp') . " $username has started archive on '$output'.\n";
+    chdir( $resultsDir ) || die "Can not access the results directory selected: $resultsDir. $!";
+    my $archive_name = "$output.tar.gz";
+    print $msg timestamp('timestamp') . " $username has started archive on '$output'.\n";
     print $msg timestamp('timestamp') . " $info Running in R&D mode.\n" if $r_and_d;
-	
-	# Add in extra BAM files and such
-	my @data = grep { -f } glob( '*.barcode.bam.zip *.support.zip' );
-	#my @plugins = grep { -d } glob( 'plugin_out/AmpliconCoveragePlots* plugin_out/variantCaller* plugin_out/varCollector* plugin_out/AmpliconCoverageAnalysis*' );
+    
+    # Add in extra BAM files and such
+    my @data = grep { -f } glob( '*.barcode.bam.zip *.support.zip' );
+    #my @plugins = grep { -d } glob( 'plugin_out/AmpliconCoveragePlots* plugin_out/variantCaller* plugin_out/varCollector* plugin_out/AmpliconCoverageAnalysis*' );
 
-	my @plugins = qw( plugin_out/AmpliconCoveragePlots_out
+    my @plugins = qw( plugin_out/AmpliconCoveragePlots_out
                       plugin_out/variantCaller_out 
                       plugin_out/varCollector_out 
                       plugin_out/AmpliconCoverageAnalysis_out
                     );
-	push( @archivelist, $_ ) for @data;
-	push( @archivelist, $_ ) for @exportFileList;
-	push( @archivelist, $_ ) for @plugins;
+    push( @archivelist, $_ ) for @data;
+    push( @archivelist, $_ ) for @exportFileList;
+    push( @archivelist, $_ ) for @plugins;
 
-	# Add check to be sure that all of the results dirs and logs are there. Exit otherwise so we don't miss anything
+    # Add check to be sure that all of the results dirs and logs are there. Exit otherwise so we don't miss anything
     if ( ! -e "explog_final.txt" ) {
         print $msg timestamp('timestamp') . " $warn explog_final is not present; may be deleted due to data archiving. Skipping.\n";
         remove_file( "explog_final.txt", \@archivelist );
@@ -308,8 +333,8 @@ if ( $archive ) {
             halt(\$resultsDir);
         }
     }
-	if ( ! -d "plugin_out/AmpliconCoverageAnalysis_out/" ) {
-		print $msg timestamp('timestamp') . " $warn AmpliconCoverageAnalysis is missing. Data may be prior to implementation.\n";
+    if ( ! -d "plugin_out/AmpliconCoverageAnalysis_out/" ) {
+        print $msg timestamp('timestamp') . " $warn AmpliconCoverageAnalysis is missing. Data may be prior to implementation.\n";
         remove_file( "plugin_out/AmpliconCoverageAnalysis_out", \@archivelist );
     }
     #if ( ! grep { /basecaller_results\/datasets_(basecaller|pipeline)\.json/ } @archivelist ) {
@@ -317,7 +342,7 @@ if ( $archive ) {
         print $msg timestamp('timestamp') . " $info No 'datasets_basecaller.json' or 'datasets_pipeline.json' files found.  Data may be prior to TSv4.0 implementation.\n";
         remove_file( "basecaller_results/datasets_basecaller.json", \@archivelist );
         remove_file( "basecaller_results/datasets_pipeline.json", \@archivelist );
-	} 
+    } 
 
     print $msg timestamp('timestamp') . " All data located.  Proceeding with archive creation\n"; 
 
@@ -327,16 +352,16 @@ if ( $archive ) {
         print "======================================\n\n";
     }
 
-	# Run the archive subs
-	if ( archive_data( \@archivelist, $archive_name ) == 1 ) {
-		print $msg timestamp('timestamp') . " Archival of experiment '$output' completed successfully\n\n";
-		print "Experiment archive completed successfully\n" if $quiet == 1;
+    # Run the archive subs
+    if ( archive_data( \@archivelist, $archive_name ) == 1 ) {
+        print $msg timestamp('timestamp') . " Archival of experiment '$output' completed successfully\n\n";
+        print "Experiment archive completed successfully\n" if $quiet == 1;
         send_mail( "success", \$resultsDir, \$case_num );
-	} else {
-		print $msg timestamp('timestamp') . " $err Archive creation failed for '$output'.  Check the logfiles for details\n\n";
-		print "$err Archive creation failed for '$output'. Check /var/log/mocha/archive.log for details\n\n" if $quiet == 1;
-		halt(\$resultsDir);
-	}
+    } else {
+        print $msg timestamp('timestamp') . " $err Archive creation failed for '$output'.  Check the logfiles for details\n\n";
+        print "$err Archive creation failed for '$output'. Check /var/log/mocha/archive.log for details\n\n" if $quiet == 1;
+        halt(\$resultsDir);
+    }
 }
 
 sub remove_file {
