@@ -29,14 +29,14 @@ use File::Path qw(remove_tree);
 use Getopt::Long qw(:config bundling auto_abbrev no_ignore_case);
 use Data::Dump;
 
-use constant DEBUG_OUTPUT => 1;
-use constant LOG_OUT      => "$ENV{'HOME'}/datacollector_dev.log";
+use constant DEBUG_OUTPUT => 0;
+#use constant LOG_OUT      => "$ENV{'HOME'}/datacollector_dev.log";
+use constant LOG_OUT      => "/var/log/mocha/archive.log";
 
-# TODO: Remove label.
-print colored( "\n*******  DEVELOPMENT VERSION OF DATACOLLECTOR  *******\n\n", "bold yellow on_black");
+#print colored( "\n*******  DEVELOPMENT VERSION OF DATACOLLECTOR  *******\n\n", "bold yellow on_black");
 
 my $scriptname = basename($0);
-my $version = "v2.7.0_112014";
+my $version = "v3.0.0_112014";
 my $description = <<"EOT";
 Program to grab data from an Ion Torrent Run and either archive it, or create a directory that can be imported 
 to another analysis computer for processing.  
