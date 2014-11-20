@@ -13,7 +13,6 @@
 # 4/12/13 - D Sims
 #
 ############################################################################################################
-
 use warnings;
 use strict;
 
@@ -37,7 +36,7 @@ use constant LOG_OUT      => "$ENV{'HOME'}/datacollector_dev.log";
 print colored( "\n*******  DEVELOPMENT VERSION OF DATACOLLECTOR  *******\n\n", "bold yellow on_black");
 
 my $scriptname = basename($0);
-my $version = "v2.6.0_111914";
+my $version = "v2.7.0_112014";
 my $description = <<"EOT";
 Program to grab data from an Ion Torrent Run and either archive it, or create a directory that can be imported 
 to another analysis computer for processing.  
@@ -126,11 +125,11 @@ open( my $log_fh, ">>", $logfile ) || die "Can't open the logfile '$logfile' for
 
 # Direct script messages to either a logfile or both STDOUT and a logfile
 my $msg;
-$msg = IO::Tee->new( \*STDOUT, $log_fh ) if $quiet == 0;
-
 if ( $quiet == 1 ) {
 	print "Running script in quiet mode. Check the log in " . LOG_OUT ." for details\n";
 	$msg = $log_fh;
+} else {
+    $msg = IO::Tee->new( \*STDOUT, $log_fh );
 }
 
 # Format the logfile output
@@ -184,7 +183,6 @@ if ($ts_version eq '4.2.1') {
 my ( $run_name ) = $resultsDir =~ /([MP]C[C123]-\d+.*_\d+)\/?$/;;
 $output = "$run_name." . timestamp('date') if ( ! defined $output );
 
-# XXX
 if ($extract) {
     data_extract();
     exit;
@@ -200,8 +198,6 @@ elsif ($archive) {
 
 sub data_extract {
     # Run the export subroutine for pushing data to a different server
-    
-    #my $destination_dir = create_dest( $outdir, '/results/xfer/' );
     my $destination_dir = create_dest( $outdir_path, '/results/xfer/' );
 
     print "Creating a copy of data in '$destination_dir from '$resultsDir' for export...\n";
@@ -238,7 +234,6 @@ sub data_extract {
 
     # Copy run data for re-analysis
     for ( @exportFileList ) {
-        #if ( /explog.*\.txt/ or /sampleKey\.txt/ ) {
         if ( ! /^sigproc/ && ! /^Bead/ ) {
             copy_data( "$resultsDir/$_", "$destination_dir/$output" );
         } else {
@@ -266,7 +261,6 @@ sub data_extract {
 sub data_archive {
     # Run full archive on data.
 
-    # XXX
     chdir( $resultsDir ) || die "Can not access the results directory selected: $resultsDir. $!";
     my $archive_name = "$output.tar.gz";
     print $msg timestamp('timestamp') . " $username has started archive on '$output'.\n";
@@ -399,9 +393,6 @@ sub archive_data {
 	my $archivename = shift;
     
 	my $cwd = getcwd; 
-    #my $path;
-
-    # XXX
     my $destination_dir = create_dest( $outdir_path, '/media/Aperio/' ); 
 
     # Check the fileshare before we start
@@ -589,11 +580,6 @@ sub md5sum {
 	# Generate an md5sum for a file and write to a textfile
 	my $file = shift;
 
-    if ( DEBUG_OUTPUT ) {
-        print "\n==============  DEBUG  ===============\n";
-        print "\tProcessing file: $file\n";
-        print "======================================\n\n";
-    }
 	my $md5_list = "md5sum.txt";
 	open( my $md5_fh, ">>", $md5_list ) || die "Can't open the md5sum.txt file for writing: $!";
 	eval {
@@ -606,12 +592,17 @@ sub md5sum {
 		close( $input_fh );
 	};
 
-    print "ret code: $@\n";
+    if ( DEBUG_OUTPUT ) {
+        print "\n==============  DEBUG  ===============\n";
+        print "\tProcessing file: $file\n";
+        print "\tret code: $@\n";
+        print "======================================\n\n";
+    }
 
 	if ( $@ ) {
 		print $msg timestamp('timestamp') . " $@\n";
 		#return 0;
-        # Call a halt for now
+        # Call  halt for now; not sure I want to continue if there's an issue...
         halt(\$resultsDir);
 	}
 }
@@ -661,17 +652,15 @@ sub send_mail {
     my $template_path = "/home/ionadmin/templates/email/";
     my $target = 'simsdj@mail.nih.gov';
     
-    # TODO: uncomment this
-    @additional_recipients = '';
-    #if ( $r_and_d ) {
-        #@additional_recipients = '';
-    #} else {
-        #@additional_recipients = qw( 
-        #harringtonrd@mail.nih.gov
-        #vivekananda.datta@nih.gov
-        #patricia.runge@nih.gov
-        #);
-    #}
+    if ( $r_and_d || DEBUG_OUTPUT ) {
+        @additional_recipients = '';
+    } else {
+        @additional_recipients = qw( 
+        harringtonrd@mail.nih.gov
+        vivekananda.datta@nih.gov
+        patricia.runge@nih.gov
+        );
+    }
 
     if ( DEBUG_OUTPUT ) {
         print "============  DEBUG  ============\n";
