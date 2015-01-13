@@ -29,14 +29,14 @@ use File::Path qw(remove_tree);
 use Getopt::Long qw(:config bundling auto_abbrev no_ignore_case);
 use Data::Dump;
 
-use constant DEBUG_OUTPUT => 0;
+use constant DEBUG_OUTPUT => 1;
 #use constant LOG_OUT      => "$ENV{'HOME'}/datacollector_dev.log";
 use constant LOG_OUT      => "/var/log/mocha/archive.log";
 
 #print colored( "\n*******  DEVELOPMENT VERSION OF DATACOLLECTOR  *******\n\n", "bold yellow on_black");
 
 my $scriptname = basename($0);
-my $version = "v3.0.0_112014";
+my $version = "v3.1.0_011315";
 my $description = <<"EOT";
 Program to grab data from an Ion Torrent Run and either archive it, or create a directory that can be imported 
 to another analysis computer for processing.  
@@ -174,9 +174,14 @@ open( my $ver_fh, "<", "$resultsDir/version.txt" ) || die "ERROR: can not open t
 close $ver_fh;
 
 # Looks like location of Bead_density files has moved in 4.2.1.
-if ($ts_version eq '4.2.1') {
-    print "Modifying path for Bead_density_data for 4.2.1+ runs...\n";
+#if ($ts_version eq '4.2.1') {
+if ($ts_version =~ /^4.2/) {
+    print "TSv4.2+ detected.  Making file and path adjustments...\n";
+    print "\tModifying path for Bead_density_data...\n";
     map { (/Bead/) ? ($_ = basename($_)) : $_ } @exportFileList;
+    print "\tRemoving request for explog_final.txt from list...\n";
+    my ($index) = grep { $exportFileList[$_] eq 'explog_final.txt' } 0..$#exportFileList;
+    splice( @exportFileList, $index, 1);
 }
 
 # Setup custom and default output names
@@ -214,15 +219,16 @@ sub data_extract {
     push( @exportFileList, "sampleKey.txt" );
 
     # Add 'analysis_return_code' file to be compatible with TSv3.4+
-    if ( ! -e "sigproc_results/analysis_return_code.txt" ) {
+    if ( ! -e "$resultsDir/sigproc_results/analysis_return_code.txt" ) {
+    #if ( ! -e "sigproc_results/analysis_return_code.txt" ) {
         print "No analysis_return_code.txt file found.  Creating one to be compatible with TSv3.4+\n";
         my $arc_file = "$sigproc_out/analysis_return_code.txt";
         open( my $arc_fh, ">", $arc_file ) || die "Can't created an analysis_return_code.txt file in '$sigproc_out: $!";
         print $arc_fh "0";
         close $arc_fh;
     } else {
-        print "Found analysis_return_code.txt file and adding to the export filelist\n";
-        push( @exportFileList, "$sigproc_out/analysis_return_code.txt" );
+        print "Found analysis_return_code.txt file. Adding to the export filelist\n";
+        push( @exportFileList, "sigproc_results/analysis_return_code.txt" );
     }
 
     if ( DEBUG_OUTPUT ) {
@@ -655,11 +661,12 @@ sub send_mail {
     if ( $r_and_d || DEBUG_OUTPUT ) {
         @additional_recipients = '';
     } else {
-        @additional_recipients = qw( 
-        harringtonrd@mail.nih.gov
-        vivekananda.datta@nih.gov
-        patricia.runge@nih.gov
-        );
+        ;
+        #@additional_recipients = qw( 
+        #harringtonrd@mail.nih.gov
+        #vivekananda.datta@nih.gov
+        #patricia.runge@nih.gov
+        #);
     }
 
     if ( DEBUG_OUTPUT ) {
