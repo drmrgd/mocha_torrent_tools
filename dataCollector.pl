@@ -29,7 +29,7 @@ use File::Path qw(remove_tree);
 use Getopt::Long qw(:config bundling auto_abbrev no_ignore_case);
 use Data::Dump;
 
-use constant DEBUG_OUTPUT => 1;
+use constant DEBUG_OUTPUT => 0;
 #use constant LOG_OUT      => "$ENV{'HOME'}/datacollector_dev.log";
 use constant LOG_OUT      => "/var/log/mocha/archive.log";
 
