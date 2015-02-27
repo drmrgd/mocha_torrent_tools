@@ -23,6 +23,7 @@ use POSIX qw(strftime);
 use Text::Wrap;
 use Term::ANSIColor;
 use Cwd;
+use Cwd qw(abs_path);
 use File::Spec;
 use Digest::MD5;
 use File::Path qw(remove_tree);
@@ -36,7 +37,7 @@ use constant LOG_OUT      => "/var/log/mocha/archive.log";
 #print colored( "\n*******  DEVELOPMENT VERSION OF DATACOLLECTOR  *******\n\n", "bold yellow on_black");
 
 my $scriptname = basename($0);
-my $version = "v3.1.0_011315";
+my $version = "v3.2.0_022715";
 my $description = <<"EOT";
 Program to grab data from an Ion Torrent Run and either archive it, or create a directory that can be imported 
 to another analysis computer for processing.  
@@ -655,18 +656,17 @@ sub send_mail {
     $$case = "---" if ( ! defined $$case );
 
     $$expt_name =~ s/\/$//;
-    my $template_path = "/home/ionadmin/templates/email/";
+    my $template_path = dirname(abs_path($0)) . "/templates/";
     my $target = 'simsdj@mail.nih.gov';
     
     if ( $r_and_d || DEBUG_OUTPUT ) {
         @additional_recipients = '';
     } else {
-        ;
-        #@additional_recipients = qw( 
-        #harringtonrd@mail.nih.gov
-        #vivekananda.datta@nih.gov
-        #patricia.runge@nih.gov
-        #);
+        @additional_recipients = qw( 
+        harringtonrd@mail.nih.gov
+        vivekananda.datta@nih.gov
+        patricia.runge@nih.gov
+        );
     }
 
     if ( DEBUG_OUTPUT ) {
@@ -679,13 +679,18 @@ sub send_mail {
     
     my ($msg, $cc_list);
     if ( $status eq 'success' ) {
-        $msg = "$template_path/archive_success.email";
+        $msg = "$template_path/archive_success.html";
         $cc_list = join( ";", @additional_recipients );
     }
     elsif ( $status eq 'failure' ) {
-        $msg = "$template_path/archive_failure.email";
+        $msg = "$template_path/archive_failure.html";
         $cc_list = '';
     }
+    elsif ( $status eq 'test' ) {
+        $msg = "$template_path/test_email.html";
+        $cc_list = '';
+    }
+
     my $content = read_file($msg);
     $content =~ s/%%CASE_NUM%%/$$case/;
     $content =~ s/%%EXPT%%/$$expt_name/;
