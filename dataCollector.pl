@@ -15,6 +15,7 @@
 ############################################################################################################
 use warnings;
 use strict;
+use version;
 
 use File::Copy;
 use File::Basename;
@@ -37,7 +38,7 @@ use constant LOG_OUT      => "/var/log/mocha/archive.log";
 #print colored( "\n*******  DEVELOPMENT VERSION OF DATACOLLECTOR  *******\n\n", "bold yellow on_black");
 
 my $scriptname = basename($0);
-my $version = "v3.2.0_022715";
+my $version = "v3.3.0_030315";
 my $description = <<"EOT";
 Program to grab data from an Ion Torrent Run and either archive it, or create a directory that can be imported 
 to another analysis computer for processing.  
@@ -175,8 +176,10 @@ open( my $ver_fh, "<", "$resultsDir/version.txt" ) || die "ERROR: can not open t
 close $ver_fh;
 
 # Looks like location of Bead_density files has moved in 4.2.1.
-#if ($ts_version eq '4.2.1') {
-if ($ts_version =~ /^4.2/) {
+my $old_version = version->parse('4.2.1');
+my $curr_version = version->parse($ts_version);
+
+if ($ts_version > $old_version ) { 
     print "TSv4.2+ detected.  Making file and path adjustments...\n";
     print "\tModifying path for Bead_density_data...\n";
     map { (/Bead/) ? ($_ = basename($_)) : $_ } @exportFileList;
@@ -328,6 +331,9 @@ sub data_archive {
         dd \@archivelist;
         print "======================================\n\n";
     }
+
+    # XXX
+    exit;
 
     # Run the archive subs
     if ( archive_data( \@archivelist, $archive_name ) == 1 ) {
