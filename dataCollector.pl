@@ -332,9 +332,6 @@ sub data_archive {
         print "======================================\n\n";
     }
 
-    # XXX
-    exit;
-
     # Run the archive subs
     if ( archive_data( \@archivelist, $archive_name ) == 1 ) {
         print $msg timestamp('timestamp') . " Archival of experiment '$output' completed successfully\n\n";
