@@ -2,18 +2,22 @@
 # Script to change the explog.txt file to match a run plan when exporting data to a different server
 # for reanalysis.
 #
+# TODO: Fix the regex renaming sub.  Can't have user input a sub regex; must be a match regex only
+#       and then need to parse it out and build the substitution.
+#
 # 11/6/2013 - D Sims
 #####################################################################################################
-
 use warnings;
 use strict;
-use Getopt::Long;
+use autodie;
+
+use Getopt::Long qw(:config bundling auto_abbrev no_ignore_case );
 use File::Basename;
 use File::Copy;
-use Data::Dumper;
+use Data::Dump;
 
 my $scriptname = basename($0);
-my $version = "v1.1.041614";
+my $version = "v1.2.0_112114";
 my $description = <<"EOT";
 Program to change the explog.txt file of an imported run.  The TS will not assign sample information
 defined in a run plan unless it matches the guid and (potentially) the short id of the explog.txt 
@@ -25,14 +29,15 @@ the necessary information can be passed, as long as it's in the following format
 
         short_id: 2112R
         guid: 94dc00d9-5974-4b57-ab72-903261a1247a
-
-Probably the easiest is to just pass the strings directly.
+        expt_name: some_new_experiment_name
 EOT
 
 my $usage = <<"EOT";
-USAGE: $0 [-s <short_id> -g <guid> | -f <file with ids>] <input_file>
+USAGE: $0 [-s <short_id> -g <guid> | -f <file with ids>] [options] <explog.txt>
     -s, --short-id  The short ID of the run plan (e.g. 2112R)
     -g, --guid      The long guid string of the run plan (e.g. 94dc00d9-5974-4b57-ab72-903261a1247a)
+    -n, --name      New experiment name.  By default, the original run name will be used.
+    -r, --regex     EXPERIMENTAL: Rename an experiment by inputting a perl regex (e.g. 's/R_\\d+_.*user_(MC3-\\d+).*/\$1_testrun/')
     -f, --file      A file containing the short id and guid of the plan (see above for requisites).
     -v, --version   Version information
     -h, --help      Print this help information
@@ -43,12 +48,17 @@ my $ver_info = 0;
 my $short_id;
 my $guid;
 my $file;
+my $expt_name;
+my $name_regex;
 
-GetOptions( "help"        => \$help,
-			"version"     => \$ver_info,
-			"guid=s"      => \$guid,
-			"short-id=s"  => \$short_id,
-			"file=s"      => \$file )
+GetOptions( "help|h"        => \$help,
+			"version|v"     => \$ver_info,
+			"guid|g=s"      => \$guid,
+			"short-id|s=s"  => \$short_id,
+			"file|f=s"      => \$file,
+            "name|n=s"      => \$expt_name,
+            "regex|r=s"     => \$name_regex,
+        )
 			or print $usage;
 
 sub help {
@@ -70,6 +80,9 @@ if ( ! ( $guid && $short_id ) && ! $file ) {
 	print $usage;
 	exit 1;
 }
+
+# Set up the name regex
+my $regex = qr/$name_regex/ if $name_regex;
 
 # Make sure enough args passed to script
 if ( scalar( @ARGV ) < 1 ) {
@@ -99,11 +112,52 @@ if ( $file ) {
         $line =~ s/^(Project:\s+).*/$1/ if ( $line =~ /Project/ );
 		$line =~ s/^(Planned Run Short ID:).*/$1 $short_id/ if ( $line =~ /Short ID/ );
 		$line =~ s/^(Planned Run GUID:).*/$1 $guid/ if ( $line =~ /GUID/ );
+        if ( $line =~ /^Experiment Name:/ ) {
+            if ( $expt_name ) {
+                $line =~ s/^(Experiment Name:).*/$1 $expt_name/;
+            }
+
+            elsif ( $regex ) {
+                my ($name) = $line =~ /: (.*)$/;
+                regex_rename($name);
+                #$name =~ $regex;
+                #$line =~ s/^(Experiment Name:).*/$1 $name/;
+            }
+        }
 	}
 
 	print $out_fh $_ for @explog_data;
 	close( $out_fh );
 }
+
+sub regex_rename {
+    # Rename an experiment by inputting a regex
+    my $orig_name = shift;
+    my $new_name;
+
+    print "Regex renaming is not yet implemented!\n";
+    exit 1;
+
+    print "=======  DEBUG  =======\n";
+    print "\tregex: $regex\n";
+    print "\torig:  $orig_name\n";
+    print "=======================\n\n";
+
+    #($new_name = $orig_name) =~ $regex;
+    #print "new:  $new_name\n";
+    $orig_name =~ $regex;
+    print "new:  $orig_name\n";
+
+    #return (($new_name) = $orig_name =~ $regex);
+
+    #if ( $orig_name =~ $regex ) {
+        #print "it was a success!\n";
+    #} else {
+        #print "nope!\n";
+    #}
+
+}
+
 
 sub from_file {
 	# If a file is provided, do this
