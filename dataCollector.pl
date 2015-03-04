@@ -15,6 +15,7 @@
 ############################################################################################################
 use warnings;
 use strict;
+use version;
 
 use File::Copy;
 use File::Basename;
@@ -23,6 +24,7 @@ use POSIX qw(strftime);
 use Text::Wrap;
 use Term::ANSIColor;
 use Cwd;
+use Cwd qw(abs_path);
 use File::Spec;
 use Digest::MD5;
 use File::Path qw(remove_tree);
@@ -36,7 +38,7 @@ use constant LOG_OUT      => "/var/log/mocha/archive.log";
 #print colored( "\n*******  DEVELOPMENT VERSION OF DATACOLLECTOR  *******\n\n", "bold yellow on_black");
 
 my $scriptname = basename($0);
-my $version = "v3.0.0_112014";
+my $version = "v3.3.0_030315";
 my $description = <<"EOT";
 Program to grab data from an Ion Torrent Run and either archive it, or create a directory that can be imported 
 to another analysis computer for processing.  
@@ -174,9 +176,16 @@ open( my $ver_fh, "<", "$resultsDir/version.txt" ) || die "ERROR: can not open t
 close $ver_fh;
 
 # Looks like location of Bead_density files has moved in 4.2.1.
-if ($ts_version eq '4.2.1') {
-    print "Modifying path for Bead_density_data for 4.2.1+ runs...\n";
+my $old_version = version->parse('4.2.1');
+my $curr_version = version->parse($ts_version);
+
+if ($ts_version > $old_version ) { 
+    print "TSv4.2+ detected.  Making file and path adjustments...\n";
+    print "\tModifying path for Bead_density_data...\n";
     map { (/Bead/) ? ($_ = basename($_)) : $_ } @exportFileList;
+    print "\tRemoving request for explog_final.txt from list...\n";
+    my ($index) = grep { $exportFileList[$_] eq 'explog_final.txt' } 0..$#exportFileList;
+    splice( @exportFileList, $index, 1);
 }
 
 # Setup custom and default output names
@@ -214,15 +223,16 @@ sub data_extract {
     push( @exportFileList, "sampleKey.txt" );
 
     # Add 'analysis_return_code' file to be compatible with TSv3.4+
-    if ( ! -e "sigproc_results/analysis_return_code.txt" ) {
+    if ( ! -e "$resultsDir/sigproc_results/analysis_return_code.txt" ) {
+    #if ( ! -e "sigproc_results/analysis_return_code.txt" ) {
         print "No analysis_return_code.txt file found.  Creating one to be compatible with TSv3.4+\n";
         my $arc_file = "$sigproc_out/analysis_return_code.txt";
         open( my $arc_fh, ">", $arc_file ) || die "Can't created an analysis_return_code.txt file in '$sigproc_out: $!";
         print $arc_fh "0";
         close $arc_fh;
     } else {
-        print "Found analysis_return_code.txt file and adding to the export filelist\n";
-        push( @exportFileList, "$sigproc_out/analysis_return_code.txt" );
+        print "Found analysis_return_code.txt file. Adding to the export filelist\n";
+        push( @exportFileList, "sigproc_results/analysis_return_code.txt" );
     }
 
     if ( DEBUG_OUTPUT ) {
@@ -649,7 +659,7 @@ sub send_mail {
     $$case = "---" if ( ! defined $$case );
 
     $$expt_name =~ s/\/$//;
-    my $template_path = "/home/ionadmin/templates/email/";
+    my $template_path = dirname(abs_path($0)) . "/templates/";
     my $target = 'simsdj@mail.nih.gov';
     
     if ( $r_and_d || DEBUG_OUTPUT ) {
@@ -672,13 +682,18 @@ sub send_mail {
     
     my ($msg, $cc_list);
     if ( $status eq 'success' ) {
-        $msg = "$template_path/archive_success.email";
+        $msg = "$template_path/archive_success.html";
         $cc_list = join( ";", @additional_recipients );
     }
     elsif ( $status eq 'failure' ) {
-        $msg = "$template_path/archive_failure.email";
+        $msg = "$template_path/archive_failure.html";
         $cc_list = '';
     }
+    elsif ( $status eq 'test' ) {
+        $msg = "$template_path/test_email.html";
+        $cc_list = '';
+    }
+
     my $content = read_file($msg);
     $content =~ s/%%CASE_NUM%%/$$case/;
     $content =~ s/%%EXPT%%/$$expt_name/;
