@@ -5,17 +5,17 @@
 #
 # Created: 12/19/2013 - D Sims
 ######################################################################################################
-
 use warnings;
 use strict;
+use autodie;
 
 use Getopt::Long;
 use File::Basename;
+use Term::ANSIColor;
 use Data::Dump;
 
-#( my $scriptname = $0 ) =~ s/^(.*\/)+//;
 my $scriptname = basename($0);
-my $version = "v0.1.041514";
+my $version = "v1.0.040115";
 my $description = <<"EOT";
 Create a batch run plan for an Ion Torrent Reanalysis.  This script will just use barcodes 001 - 032 to
 create the template necessary for a batch upload to the Torrent Browser run plan API.  For now the rest
@@ -59,11 +59,11 @@ help if $help;
 version if $ver_info;
 
 # Make sure enough args passed to script
-#if ( scalar( @ARGV ) < 1 ) {
-	#print "ERROR: Not enough arguments passed to script!\n\n";
-	#print "$usage\n";
-	#exit 1;
-#}
+if ( scalar( @ARGV ) < 1 ) {
+    print "ERROR: Not enough arguments passed to script!\n\n";
+    print "$usage\n";
+    exit 1;
+}
 
 # Write output to either indicated file or STDOUT
 my $out_fh;
@@ -74,7 +74,6 @@ if ( $outfile ) {
 }
 
 #########------------------------------ END ARG Parsing ---------------------------------#########
-
 my @expt_dirs= @ARGV;
 
 # Check to be sure we have a sampleKey.txt file for each one or else we can't proceed.
@@ -82,26 +81,24 @@ for my $dir ( @expt_dirs ) {
     opendir( my $dir_fh, $dir );
     #print "processing $dir\n";
     if ( ! grep { -f "$dir/sampleKey.txt" } readdir($dir_fh) ) {
-        print "ERROR: no sample key file found in '$dir'\n";
-        exit 1;
+        print colored("WARNING: No sample key file found in '$dir'. Skipping...", 'bold yellow on_black'), "\n";
+        next;
     }
 }
 
 my %data;
 for my $expt ( @expt_dirs ) {
-    # XXX Trim more: take it all the way to the tech initials
-    #(my $runname = $expt) =~ s/(.*?)(:?_\d+)?_\d+\.\d{8}\/?$/${prefix}_$1$2/;
-    (my $runname = $expt) =~ s/(.*?\d+.\w+).*\d{8}?$/${prefix}_$1/;
+    (my $runname = $expt) =~ s/(.*?)\.\d{8}?$/${prefix}_$1/;
     open( my $sk_fh, "<", "$expt/sampleKey.txt" ) || die "Can't open the sampleKey.txt file: $!";
     $data{$runname} = { map{ chomp; split( /\t/, $_) } <$sk_fh> };
 }
 
-dd %data;
-exit;
+#dd %data;
+#exit;
 
 my %agg_data;
 my @bc_list;
-for ( my $num = 1; $num <= 32; $num++ ) {
+for ( my $num = 1; $num <= 96; $num++ ) {
     my $barcode = "IonXpress_" . pad_numbers(\$num);
     push( @bc_list, $barcode );
     for my $run ( keys %data ) {
