@@ -38,7 +38,7 @@ use constant LOG_OUT      => "/var/log/mocha/archive.log";
 #print colored( "\n*******  DEVELOPMENT VERSION OF DATACOLLECTOR  *******\n\n", "bold yellow on_black");
 
 my $scriptname = basename($0);
-my $version = "v3.3.0_030315";
+my $version = "v3.3.1_030315";
 my $description = <<"EOT";
 Program to grab data from an Ion Torrent Run and either archive it, or create a directory that can be imported 
 to another analysis computer for processing.  
@@ -179,13 +179,15 @@ close $ver_fh;
 my $old_version = version->parse('4.2.1');
 my $curr_version = version->parse($ts_version);
 
-if ($ts_version > $old_version ) { 
+if ($ts_version >= $old_version ) { 
     print "TSv4.2+ detected.  Making file and path adjustments...\n";
     print "\tModifying path for Bead_density_data...\n";
     map { (/Bead/) ? ($_ = basename($_)) : $_ } @exportFileList;
     print "\tRemoving request for explog_final.txt from list...\n";
     my ($index) = grep { $exportFileList[$_] eq 'explog_final.txt' } 0..$#exportFileList;
     splice( @exportFileList, $index, 1);
+} else {
+    print "An older version ($ts_version) was detected.  Using old paths\n";
 }
 
 # Setup custom and default output names
