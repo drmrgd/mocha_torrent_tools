@@ -19,7 +19,7 @@ use Data::Dump;
 use Log::Log4perl qw{ get_logger };
 
 my $scriptname = basename($0);
-my $version = "v1.3.0_041515";
+my $version = "v2.0.0_041515";
 my $description = <<"EOT";
 Script to mirror report data to an external hard drive mounted at /media/MoCha_backup.  This script will determine
 the data size of the external hard drive, and if needed rotate out the oldest run (note: not determined by last
@@ -71,7 +71,7 @@ $logger->info( "Starting data mirror to external hard drive..." );
 
 #########------------------------------ END ARG Parsing ---------------------------------#########
 my $results_path = "/results/analysis/output/Home";
-my $db_backup_path = '/results/dbase_backup/';
+my $db_backup_path = '/results/dbase_backup';
 my $backup_path = "/media/MoCha_backup";
 
 # Make sure the external hard drive is mounted before starting.
@@ -103,8 +103,8 @@ for my $run ( @$files_for_backup ) {
 
 # Make backup of the dbase_backup directory so that we can import runs to a new server if need be
 $logger->info("Syncing backup of database backup directory...");
-eval { qx(rsycn -avz $db_backup_path $backup_path) };
-($@) ? $logger->error("$@") : $logger->info( "Database backup direcotory was successfully synced to backup directory" );
+eval { qx(rsync -avz $db_backup_path $backup_path) };
+($@) ? $logger->error("$@") : $logger->info( "Database backup directory was successfully synced to backup directory" );
 
 $logger->info( "Data backup to external hard drive is complete\n\n" );
 
