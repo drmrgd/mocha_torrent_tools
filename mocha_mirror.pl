@@ -19,7 +19,7 @@ use Data::Dump;
 use Log::Log4perl qw{ get_logger };
 
 my $scriptname = basename($0);
-my $version = "v2.0.0_041515";
+my $version = "v2.1.0_041615";
 my $description = <<"EOT";
 Script to mirror report data to an external hard drive mounted at /media/MoCha_backup.  This script will determine
 the data size of the external hard drive, and if needed rotate out the oldest run (note: not determined by last
@@ -147,8 +147,9 @@ sub get_runlist {
 
     # Get list of files on MoCha_backup drive.
     opendir( my $mirrordir, $$bak_path ) || $logger->logdie("Can't read the MoCha_backup directory: $!");
-    my @mirrorfiles = sort_data( [grep { ! /^(:?[.]+) | lost/x } readdir( $mirrordir )] );
+    my @mirrorfiles = sort_data( [grep { ! /^\.+ | lost | dbase/x } readdir( $mirrordir )] );
     my ($last_run) = $mirrorfiles[-1] =~ /_(\d+)$/;
+
 
     # Get list of files in /results 
     opendir( my $datadir, $$data_path ) || $logger->logdie("Can't read the /results directory: $!");
