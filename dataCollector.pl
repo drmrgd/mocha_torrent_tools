@@ -10,6 +10,14 @@
 # the copied archive is compared to the original to make sure it did not get corrupted during the transfer
 # and if successful the local copy is deleted.
 #
+# TODO: 
+#     - Tests:
+#         1. OCP Run
+#         2. MPACT Run
+#         3. Pass email / fail email
+#         4. Check email lists.
+#         5. Redesign the template?
+#
 # 4/12/13 - D Sims
 #
 ############################################################################################################
@@ -26,7 +34,6 @@ use Text::Wrap;
 use Term::ANSIColor;
 use Cwd;
 use Cwd qw(abs_path);
-#use File::Spec;
 use Digest::MD5;
 use File::Path qw(remove_tree);
 use Getopt::Long qw(:config bundling auto_abbrev no_ignore_case);
@@ -37,8 +44,7 @@ use constant DEBUG_OUTPUT => 1;
 use constant LOG_OUT       => "/results/sandbox/dc-test/datacollector_dev.log";
 #use constant LOG_OUT      => "/var/log/mocha/archive.log";
 
-print colored( "\n*******  DEVELOPMENT VERSION OF DATACOLLECTOR  *******\n\n", "bold yellow on_black");
-
+print colored( "\n******************************************************\n*******  DEVELOPMENT VERSION OF DATACOLLECTOR  *******\n******************************************************\n\n", "bold yellow on_black");
 my $scriptname = basename($0);
 my $version = "v3.3.2_042015";
 my $description = <<"EOT";
@@ -71,8 +77,8 @@ USAGE: $scriptname [options] [-a | -e] <results dir>
     -h, --help       Display the help information
 EOT
 
-my $verInfo = 0;
-my $help = 0;
+my $version_info = 0;
+my $help;
 my $archive;
 my $extract;
 my $output;
@@ -83,7 +89,7 @@ my $r_and_d;
 my $ocp_run;
 
 GetOptions( "help|h"      => \$help,
-            "version|v"   => \$verInfo,
+            "version|v"   => \$version_info,
             "quiet|q"     => \$quiet,
             "extract|e"   => \$extract,
             "archive|a"   => \$archive,
@@ -99,13 +105,13 @@ sub help {
 	exit;
 }
 
-sub version_info {
+sub version {
 	printf "%s - %s\n", $scriptname, $version;
 	exit;
 }
 
 help if $help;
-version_info if $verInfo;
+version if $version_info;
 
 my $username = $ENV{'USER'};
 
@@ -339,8 +345,6 @@ sub data_archive {
         print "======================================\n\n";
     }
 
-    exit;
-
     # Run the archive subs
     if ( archive_data( \@archivelist, $archive_name ) == 1 ) {
         print $msg timestamp('timestamp') . " Archival of experiment '$output' completed successfully\n\n";
@@ -372,13 +376,10 @@ sub get_bams {
         push( @wanted_bams, $bam ) if exists $samples{$barcode};
     }
 
-    # TODO: finish this with better name, and return the file for the archive list.
+    # Generate a zip archive of the desired BAM files.
     system('zip', $zipfile, @wanted_bams );
 
-
-    exit;
-
-    return;
+    return $zipfile;
 }
 
 sub create_dest {
