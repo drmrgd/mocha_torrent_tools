@@ -16,6 +16,7 @@
 use warnings;
 use strict;
 use version;
+use autodie;
 
 use File::Copy;
 use File::Basename;
@@ -25,20 +26,21 @@ use Text::Wrap;
 use Term::ANSIColor;
 use Cwd;
 use Cwd qw(abs_path);
-use File::Spec;
+#use File::Spec;
 use Digest::MD5;
 use File::Path qw(remove_tree);
 use Getopt::Long qw(:config bundling auto_abbrev no_ignore_case);
 use Data::Dump;
 
-use constant DEBUG_OUTPUT => 0;
+use constant DEBUG_OUTPUT => 1;
 #use constant LOG_OUT      => "$ENV{'HOME'}/datacollector_dev.log";
-use constant LOG_OUT      => "/var/log/mocha/archive.log";
+use constant LOG_OUT       => "/results/sandbox/dc-test/datacollector_dev.log";
+#use constant LOG_OUT      => "/var/log/mocha/archive.log";
 
-#print colored( "\n*******  DEVELOPMENT VERSION OF DATACOLLECTOR  *******\n\n", "bold yellow on_black");
+print colored( "\n*******  DEVELOPMENT VERSION OF DATACOLLECTOR  *******\n\n", "bold yellow on_black");
 
 my $scriptname = basename($0);
-my $version = "v3.3.1_030315";
+my $version = "v3.3.2_042015";
 my $description = <<"EOT";
 Program to grab data from an Ion Torrent Run and either archive it, or create a directory that can be imported 
 to another analysis computer for processing.  
@@ -74,7 +76,7 @@ my $help = 0;
 my $archive;
 my $extract;
 my $output;
-my $quiet = 0;
+my $quiet;
 my $outdir = '';
 my $case_num = '';
 my $r_and_d;
@@ -119,7 +121,8 @@ if ( ! defined $resultsDir ) {
 }
 
 # Get the absolute path of the target dir so that we can find it later.
-my $outdir_path = File::Spec->rel2abs($outdir) if $outdir;
+#my $outdir_path = File::Spec->rel2abs($outdir) if $outdir;
+my $outdir_path = abs_path($outdir) if $outdir;
 
 # Create logfile for archive process
 my $logfile = LOG_OUT;
@@ -127,7 +130,7 @@ open( my $log_fh, ">>", $logfile ) || die "Can't open the logfile '$logfile' for
 
 # Direct script messages to either a logfile or both STDOUT and a logfile
 my $msg;
-if ( $quiet == 1 ) {
+if ( $quiet ) {
 	print "Running script in quiet mode. Check the log in " . LOG_OUT ." for details\n";
 	$msg = $log_fh;
 } else {
@@ -161,13 +164,14 @@ my @exportFileList = qw{
 	explog.txt
     explog_final.txt
     version.txt
+    sampleKey.txt
 };
 
 my @archivelist = qw{ 
 	ion_params_00.json
     basecaller_results/datasets_basecaller.json
     basecaller_results/datasets_pipeline.json
-    pgm_logs.zip
+    sysinfo.txt
 };
 
 # Find out what TS version running in order to customize some downstream functions
@@ -188,6 +192,14 @@ if ($ts_version >= $old_version ) {
     splice( @exportFileList, $index, 1);
 } else {
     print "An older version ($ts_version) was detected.  Using old paths\n";
+}
+
+# Generate a sampleKey.txt file for the package
+print "Generating a sampleKey.txt file for the export package...\n";
+eval { system( "cd $resultsDir && sampleKeyGen -o sampleKey.txt" ) };
+if ($@) {
+    print "$err SampleKeyGen Script encountered errors: $@\n";
+    exit 1;
 }
 
 # Setup custom and default output names
@@ -215,21 +227,12 @@ sub data_extract {
     system( "mkdir -p $destination_dir/$output/sigproc_results/" );
     my $sigproc_out = "$destination_dir/$output/sigproc_results/";
 
-    # Generate a sampleKey.txt file for the package
-    print "Generating a sampleKey.txt file for the export package...\n";
-    eval { system( "cd $resultsDir && sampleKeyGen -o sampleKey.txt" ) };
-    if ($@) {
-        print "$err SampleKeyGen Script encountered errors: $@\n";
-        exit;
-    }
-    push( @exportFileList, "sampleKey.txt" );
-
     # Add 'analysis_return_code' file to be compatible with TSv3.4+
     if ( ! -e "$resultsDir/sigproc_results/analysis_return_code.txt" ) {
-    #if ( ! -e "sigproc_results/analysis_return_code.txt" ) {
         print "No analysis_return_code.txt file found.  Creating one to be compatible with TSv3.4+\n";
         my $arc_file = "$sigproc_out/analysis_return_code.txt";
-        open( my $arc_fh, ">", $arc_file ) || die "Can't created an analysis_return_code.txt file in '$sigproc_out: $!";
+        open( my $arc_fh, ">", $arc_file ) 
+            || die "Can't created an analysis_return_code.txt file in '$sigproc_out': $!";
         print $arc_fh "0";
         close $arc_fh;
     } else {
@@ -257,7 +260,8 @@ sub data_extract {
     chdir( $destination_dir );
     print "Creating a tarball of $output for export...\n";
 
-    if ( system( "tar -cf - $output | pigz -9 -p 8 > '${output}.tar.gz'" ) != 0 ) {
+    #if ( system( "tar -cf - $output | pigz -9 -p 8 > '${output}.tar.gz'" ) != 0 ) {
+    if ( system( "tar cfz ${output}.tar.gz $output" ) != 0 ) {
         print "$err Tarball creation of '$output' failed.\n";
         printf "child died with signal %d, %s coredump\n", 
             ($? & 127), ($? & 128) ? 'with' : 'without';
@@ -278,55 +282,56 @@ sub data_archive {
     print $msg timestamp('timestamp') . " $username has started archive on '$output'.\n";
     print $msg timestamp('timestamp') . " $info Running in R&D mode.\n" if $r_and_d;
     
-    # Add in extra BAM files and such
-    my @data = grep { -f } glob( '*.barcode.bam.zip *.support.zip' );
-    my @plugins = qw( plugin_out/AmpliconCoveragePlots_out
-                      plugin_out/variantCaller_out 
-                      plugin_out/varCollector_out 
-                      plugin_out/AmpliconCoverageAnalysis_out
-                      plugin_out/CoverageAnalysis_out
-                    );
-    push( @archivelist, $_ ) for @data;
+    # Get listing of plugin results to compare; have to deal with random numbered dirs now
+    opendir( my $plugin_dir, "plugin_out" ); 
+    my @plugin_results = sort( grep { !/^[.]+$/ } readdir( $plugin_dir) );
+
+    my @wanted_plugins = qw( variantCaller_out 
+                             varCollector_out 
+                             AmpliconCoverageAnalysis_out 
+                             CoverageAnalysis_out
+                           );
+
+    for my $plugin_data (@plugin_results) {
+        push( @archivelist, "plugin_out/$plugin_data" ) if grep { $plugin_data =~ /$_/ } @wanted_plugins;
+    }
     push( @archivelist, $_ ) for @exportFileList;
-    push( @archivelist, $_ ) for @plugins;
 
-    # Add check to be sure that all of the results dirs and logs are there. Exit otherwise so we don't miss anything
-    if ( ! -e "explog_final.txt" ) {
-        print $msg timestamp('timestamp') . " $warn explog_final is not present; may be deleted due to data archiving. Skipping.\n";
-        remove_file( "explog_final.txt", \@archivelist );
-    } 
-    if ( ! -d "plugin_out/variantCaller_out/" ) {
+    # Check to be sure that all of the results logs are there or exit so we don't miss anything
+    if ( ! grep { /variantCaller_out/ } @archivelist ) {
         if ( $r_and_d || $ocp_run ) {
-            print $msg timestamp('timestamp') . " $warn No TVC results directory.  Skipping.\n";
-            remove_file( "plugin_out/variantCaller_out", \@archivelist );
+            print $msg timestamp('timestamp') . " $warn No TVC results directory.  Skipping...\n";
         } else {
-            print $msg timestamp('timestamp') . " $err TVC results directory is missing.  Did you run TVC?\n";
-            halt(\$resultsDir);
+            print $msg timestamp('timestamp') . " $err TVC results directory is missing. Did you run TVC?\n";
+            halt(\$resultsDir, 1);
         }
     }
-    if ( ! -d "plugin_out/AmpliconCoveragePlots_out/" ) {
-        print $msg timestamp('timestamp') . " $warn AmpliconCoveragePlots directory is not present. Skipping.\n";
-        remove_file( "plugin_out/AmpliconCoveragePlots_out", \@archivelist );
-    }
-    if ( ! -d "plugin_out/varCollector_out/" ) {
+    if ( ! grep { /varCollector/ } @archivelist ) {
         if ( $r_and_d || $ocp_run ) {
-            print $msg timestamp('timestamp') . " $warn No varCollector plugin data. Skipping.\n";
-            remove_file( "plugin_out/varCollector_out", \@archivelist );
+            print $msg timestamp('timestamp') . " $warn No varCollector plugin data. Skipping...\n";
         } else {
-            print $msg timestamp('timestamp') . " $err No varCollector plugin data.  Did you run varCollector?\n";
-            halt(\$resultsDir);
+            print $msg timestamp('timestamp') . " $err No varCollector plugin data. Was varCollector run?\n";
+            halt(\$resultsDir, 1);
         }
     }
-    if ( ! -d "plugin_out/AmpliconCoverageAnalysis_out/" ) {
-        print $msg timestamp('timestamp') . " $warn AmpliconCoverageAnalysis is missing. Data may be prior to implementation.\n";
-        remove_file( "plugin_out/AmpliconCoverageAnalysis_out", \@archivelist );
+    if ( ! grep { /AmpliconCoverageAnalysis_out/ } @archivelist ) {
+        if ( $r_and_d || $ocp_run ) {
+            print $msg timestamp('timestamp') . " $warn No AmpliconCoverageAnalysisData. Skipping...\n"; 
+        } 
     }
-
-    if ( ! -d "plugin_out/CoverageAnalysis_out/" ) {
-        print $msg timestamp('timestamp') . " $warn CoverageAnalysis Plugin data missing. OK for now....\n";
-        remove_file( "plugin_out/CoverageAnalysis_out", \@archivelist );
+    if ( ! grep { /CoverageAnalysis_out/ } @archivelist ) {
+        if ( $ocp_run ) {
+            print $msg timestamp('timestamp') . " $err CoverageAnalysis data is missing.\n"; 
+            halt(\$resultsDir, 1);
+        } else {
+            print $msg timestamp('timestamp') . " $warn No CoverageAnalysis. Skipping...\n"; 
+        }
     }
     print $msg timestamp('timestamp') . " All data located.  Proceeding with archive creation\n"; 
+
+    # Collect BAM files for the archive
+    my $bamzip = get_bams();
+    push(@archivelist, $bamzip);
 
     if ( DEBUG_OUTPUT ) {
         print "\n==============  DEBUG  ===============\n";
@@ -334,16 +339,46 @@ sub data_archive {
         print "======================================\n\n";
     }
 
+    exit;
+
     # Run the archive subs
     if ( archive_data( \@archivelist, $archive_name ) == 1 ) {
         print $msg timestamp('timestamp') . " Archival of experiment '$output' completed successfully\n\n";
-        print "Experiment archive completed successfully\n" if $quiet == 1;
+        print "Experiment archive completed successfully\n" if $quiet;
         send_mail( "success", \$resultsDir, \$case_num );
     } else {
         print $msg timestamp('timestamp') . " $err Archive creation failed for '$output'.  Check the logfiles for details\n\n";
-        print "$err Archive creation failed for '$output'. Check /var/log/mocha/archive.log for details\n\n" if $quiet == 1;
+        #print "$err Archive creation failed for '$output'. Check /var/log/mocha/archive.log for details\n\n" if $quiet == 1;
+        print "$err Archive creation failed for '$output'. Check " . LOG_OUT . " for details\n\n" if $quiet;
         halt(\$resultsDir);
     }
+}
+
+sub get_bams {
+    # Generate a zipfile of BAMs generated for each samle for the archive
+    my $zipfile = basename($resultsDir) . "_library_bams.zip";
+
+    open( my $sample_key, "<", "sampleKey.txt" );
+    my %samples = map{ chomp; split(/\t/) } <$sample_key>;
+    close $sample_key;
+
+    my $cwd = abs_path();
+    opendir( my $dir, $cwd);
+    my @bam_files = grep { /IonXpress.*\.bam(?:\.bai)?$/ } readdir($dir);
+
+    my @wanted_bams;
+    for my $bam (@bam_files) {
+        my ($barcode) = $bam =~ /(IonXpress_\d+)/;
+        push( @wanted_bams, $bam ) if exists $samples{$barcode};
+    }
+
+    # TODO: finish this with better name, and return the file for the archive list.
+    system('zip', $zipfile, @wanted_bams );
+
+
+    exit;
+
+    return;
 }
 
 sub create_dest {
@@ -382,18 +417,6 @@ sub create_dest {
     return $destination_dir;
 }
 
-sub remove_file {
-    # remove file from extract or archive list; called too many times to not have subroutine!
-    my $file = shift;
-    my $filelist = shift;
-
-    print $msg timestamp('timestamp') . " Removing file '$file' from archive list\n";
-    my ($index) = grep { $archivelist[$_] eq $file } 0..$#$filelist;
-    splice( @$filelist, $index, 1 );
-
-    return;
-}
-
 sub copy_data {
 	my ( $file, $location ) = @_;
 	print "Copying file '$file' to '$location'...\n";
@@ -430,7 +453,8 @@ sub archive_data {
 	print $msg timestamp('timestamp') . " Creating a tarball archive of $archivename.\n";
 
 	# Use two step tar process with 'pigz' multicore gzip utility to speed things up a bit. 
-	if ( system( "tar -cf - @$filelist | pigz -9 -p 8 > $archivename" ) != 0 ) {
+	#if ( system( "tar -cf - @$filelist | pigz -9 -p 8 > $archivename" ) != 0 ) {
+     if ( system( "tar cfz $archivename @$filelist" ) != 0 ) {
 		print $msg timestamp('timestamp') . " $err Tarball creation failed: $?.\n"; 
         halt( \$resultsDir );
 	} else {
@@ -481,7 +505,6 @@ sub archive_data {
 	binmode( $pre_fh );
 	my $init_tarball_md5 = Digest::MD5->new->addfile($pre_fh)->hexdigest;
 	close( $pre_fh );
-    #if ($debug) {
     if (DEBUG_OUTPUT) {
         print "\n==============  DEBUG  ===============\n";
         print "\tMD5 Hash = " . $init_tarball_md5 . "\n"; 
@@ -545,14 +568,22 @@ sub timestamp {
 
 sub halt {
     my $expt_name = shift;
-	print $msg timestamp('timestamp') . " The archive script encountered errors and was unable to complete successfully\n\n";
+    my $code = shift;
+
+    my %fail_codes = (
+        1  => "missing files",
+        2  => "failed checksum",
+        3  => "tarball creation failure",
+        4  => "unspecified error",
+    );
+    my $error = " The archive script failed due to '" . colored($fail_codes{$code}, "bold cyan on_black") . "' and is unable to continue.\n\n"; 
+	print $msg timestamp('timestamp'), $error; 
     send_mail( "failure", $expt_name );
 	exit 1;
 }
 
 sub mount_check {
 	# Double check that the destination filesystem is mounted before we begin. 
-
 	my $mount_point = shift;
     $$mount_point =~ s/\/$//; # Get rid of terminal forward slash to match mount info
 
@@ -572,14 +603,14 @@ sub process_md5_files {
 	# all files within a list.
 	my $filelist = shift;
 	
-	# Since symlinks can cause downstrem problems is the dir structure changes, skip adding these to the md5sum check
 	foreach my $file ( @$filelist ) {
+        # Skip symlinked files
 		if ( -l $file ) {
 			next;
 		}
 		if ( -d $file ) {
-			opendir( DIR, $file ) || die "Can't open the dir '$file': $!";
-			my @dirlist = sort( grep { !/^\.|\.\.}$/ } readdir( DIR ) );
+			opendir( my $dir_handle, $file ) || die "Can't open the dir '$file': $!";
+			my @dirlist = sort( grep { !/^\.|\.\.}$/ } readdir( $dir_handle) );
 			my @recurs_files = map { $file ."/". $_ } @dirlist;
 			process_md5_files( \@recurs_files );
 		} else {
@@ -613,15 +644,12 @@ sub md5sum {
 
 	if ( $@ ) {
 		print $msg timestamp('timestamp') . " $@\n";
-		#return 0;
-        # Call  halt for now; not sure I want to continue if there's an issue...
         halt(\$resultsDir);
 	}
 }
 
 sub create_archive_dir {
     #Create an archive directory with a case name for pooling all clinical data together
-    
     my $case = shift;
     my $path = shift;
 
@@ -643,7 +671,6 @@ sub create_archive_dir {
         print $msg timestamp('timestamp') . " Creating subdirectory '$archive_dir' to put archive into...\n";
         mkdir( "$archive_dir" ) || die "$err Can not create an archive directory in '$$path'";
     }
-
     return $archive_dir;
 }
 
