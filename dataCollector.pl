@@ -45,22 +45,23 @@ use constant LOG_OUT       => "/results/sandbox/dc-test/datacollector_dev.log";
 #use constant LOG_OUT      => "/var/log/mocha/archive.log";
 
 print colored( "\n******************************************************\n*******  DEVELOPMENT VERSION OF DATACOLLECTOR  *******\n******************************************************\n\n", "bold yellow on_black");
+
 my $scriptname = basename($0);
-my $version = "v3.3.2_042015";
+my $version = "v3.4.0_042115";
 my $description = <<"EOT";
 Program to grab data from an Ion Torrent Run and either archive it, or create a directory that can be imported 
 to another analysis computer for processing.  
 
-For data import / export, program will grab raw data (starting from 1.wells file) from completed Ion Torrent NGS run,
-including all of the other raw data files required to reanalyze from basecalling through final variant calling. The
-default location for the data is /results/xfer.
+For data import / export, program will grab raw data (starting from 1.wells file) from completed Ion Torrent 
+NGS run, including all of the other raw data files required to reanalyze from basecalling through final 
+variant calling. The default location for the data is /results/xfer.
 
-For archiving, a hardcoded list of files including the system log files (CSA archive) and the BAM files for all 
-of the barcoded samples, and the 'collectedVariants' directory will be added to a tar.gz archive. Note that all
-data is required to be present for the script to run as these data components are required for a full analysis
-and no archive would be complete without all of that data.  This data should also suffice for downstream reanalysis 
-starting from either basecalling or alignment if need be as it contains a superset of the data collected in the 
-export option as well.
+For archiving, a hardcoded list of files including the system log files (CSA archive) and the BAM files for 
+all of the barcoded samples, and the 'collectedVariants' directory will be added to a tar.gz archive. Note 
+that all data is required to be present for the script to run as these data components are required for a 
+full analysis and no archive would be complete without all of that data.  This data should also suffice for 
+downstream reanalysis starting from either basecalling or alignment if need be as it contains a superset of 
+the data collected in the export option as well.
 EOT
 
 my $usage = <<"EOT";
@@ -77,7 +78,7 @@ USAGE: $scriptname [options] [-a | -e] <results dir>
     -h, --help       Display the help information
 EOT
 
-my $version_info = 0;
+my $ver_info;
 my $help;
 my $archive;
 my $extract;
@@ -89,7 +90,7 @@ my $r_and_d;
 my $ocp_run;
 
 GetOptions( "help|h"      => \$help,
-            "version|v"   => \$version_info,
+            "version|v"   => \$ver_info,
             "quiet|q"     => \$quiet,
             "extract|e"   => \$extract,
             "archive|a"   => \$archive,
@@ -105,13 +106,14 @@ sub help {
 	exit;
 }
 
-sub version {
-	printf "%s - %s\n", $scriptname, $version;
-	exit;
+sub print_version {
+    # Have to change sub name due to 'version' package import for checking below
+    printf "%s - %s\n", $scriptname, $version;
+    exit;
 }
 
 help if $help;
-version if $version_info;
+print_version if $ver_info;
 
 my $username = $ENV{'USER'};
 
@@ -346,10 +348,15 @@ sub data_archive {
     }
 
     # Run the archive subs
-    if ( archive_data( \@archivelist, $archive_name ) == 1 ) {
+    my ($status, $md5sum, $archive_dir) = archive_data( \@archivelist, $archive_name );
+    #if ( archive_data( \@archivelist, $archive_name ) == 1 ) {
+    if ( $status == 1 ) {
         print $msg timestamp('timestamp') . " Archival of experiment '$output' completed successfully\n\n";
         print "Experiment archive completed successfully\n" if $quiet;
-        send_mail( "success", \$resultsDir, \$case_num );
+        #send_mail( "success", \$resultsDir, \$case_num );
+        # XXX
+        # ADD: output path, md5sum
+        send_mail( "success", \$resultsDir, \$case_num, \$archive_dir, \$md5sum );
     } else {
         print $msg timestamp('timestamp') . " $err Archive creation failed for '$output'.  Check the logfiles for details\n\n";
         #print "$err Archive creation failed for '$output'. Check /var/log/mocha/archive.log for details\n\n" if $quiet == 1;
@@ -377,7 +384,7 @@ sub get_bams {
     }
 
     # Generate a zip archive of the desired BAM files.
-    system('zip', $zipfile, @wanted_bams );
+    system('zip -q', $zipfile, @wanted_bams );
 
     return $zipfile;
 }
@@ -430,6 +437,8 @@ sub archive_data {
     
 	my $cwd = getcwd; 
     my $destination_dir = create_dest( $outdir_path, '/media/Aperio/' ); 
+
+    return (1, '93038889640fd9259da155b7de0755a1', 'some/directory/');
 
     # Check the fileshare before we start
     mount_check(\$destination_dir);
@@ -550,7 +559,11 @@ sub archive_data {
 		print $msg timestamp('timestamp') . " $info The md5sum for the archive is in agreement. The local copy will now be deleted.\n";
 		unlink( $archivename );
 	}
-	return 1;
+    # XXX
+    #
+    # Return MD5sum and outdir?
+    return (1, $post_tarball_md5, $archive_dir);
+	#return 1;
 }
 
 sub timestamp {
@@ -675,6 +688,7 @@ sub create_archive_dir {
     return $archive_dir;
 }
 
+# XXX
 sub send_mail {
     # Send out a system email upon error or completion of archive
     use File::Slurp;
@@ -684,11 +698,16 @@ sub send_mail {
     my $status = shift;
     my $expt_name = shift;
     my $case = shift;
+    my $outdir = shift;
+    my $md5sum = shift;
     my @additional_recipients;
 
-    $$case = "---" if ( ! defined $$case );
-
+    $$case //= "---"; 
     $$expt_name =~ s/\/$//;
+    my ($pgm_name) = $$expt_name =~ /([PM]C[123C]-\d+)/;
+    $pgm_name //= 'Unknown';
+    (my $time = timestamp('timestamp')) =~ s/[\[\]]//g;
+
     my $template_path = dirname(abs_path($0)) . "/templates/";
     my $target = 'simsdj@mail.nih.gov';
     
@@ -704,15 +723,20 @@ sub send_mail {
 
     if ( DEBUG_OUTPUT ) {
         print "============  DEBUG  ============\n";
+        print "\ttime:   $time\n";
         print "\tstatus: $status\n";
-        print "\tcase: $$case\n";
-        print "\tname: $$expt_name\n";
+        print "\tname:   $$expt_name\n";
+        print "\tcase:   $$case\n";
+        print "\tpath:   $$outdir\n";
+        print "\tmd5sum: $$md5sum\n";
+        print "\tpgm:    $pgm_name\n";
         print "=================================\n";
     }
-    
+
+    # Choose template and recipient.
     my ($msg, $cc_list);
     if ( $status eq 'success' ) {
-        $msg = "$template_path/archive_success.html";
+        $msg = "$template_path/clinical_archive_success.html";
         $cc_list = join( ";", @additional_recipients );
     }
     elsif ( $status eq 'failure' ) {
@@ -725,8 +749,13 @@ sub send_mail {
     }
 
     my $content = read_file($msg);
-    $content =~ s/%%CASE_NUM%%/$$case/;
-    $content =~ s/%%EXPT%%/$$expt_name/;
+    # Replace dummy fields with specific data in the message template.
+    $content =~ s/%%CASE_NUM%%/$$case/g;
+    $content =~ s/%%EXPT%%/$$expt_name/g;
+    $content =~ s/%%PATH%%/$$outdir/g;
+    $content =~ s/%%PGM%%/$pgm_name/g;
+    $content =~ s/%%MD5%%/$$md5sum/g;
+    $content =~ s/%%DATE%%/$time/g;
 
     my $message = Email::MIME->create(
         header_str => [
