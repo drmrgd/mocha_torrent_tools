@@ -14,12 +14,8 @@
 #     - Tests:
 #         1. OCP Run
 #         2. MPACT Run
-#         3. Pass email / fail email
-#         4. Check email lists.
-#         5. Redesign the template?
 #
 # 4/12/13 - D Sims
-#
 ############################################################################################################
 use warnings;
 use strict;
@@ -47,7 +43,7 @@ use constant LOG_OUT       => "/results/sandbox/dc-test/datacollector_dev.log";
 print colored( "\n******************************************************\n*******  DEVELOPMENT VERSION OF DATACOLLECTOR  *******\n******************************************************\n\n", "bold yellow on_black");
 
 my $scriptname = basename($0);
-my $version = "v3.4.0_042115";
+my $version = "v3.5.0_042115";
 my $description = <<"EOT";
 Program to grab data from an Ion Torrent Run and either archive it, or create a directory that can be imported 
 to another analysis computer for processing.  
@@ -65,7 +61,8 @@ the data collected in the export option as well.
 EOT
 
 my $usage = <<"EOT";
-USAGE: $scriptname [options] [-a | -e] <results dir>
+USAGE: $scriptname [options] [-t] <'clinical', 'general'> [-a | -e] <results dir>
+    -t, --type       Type of experiment data to be archived ('clinical', 'general').
     -a, --archive    Create tarball archive of the run data
     -e, --extract    Extract the data for re-analysis on another computer.
     -c, --case       Case number to use for new directory generation
@@ -88,6 +85,7 @@ my $outdir = '';
 my $case_num = '';
 my $r_and_d;
 my $ocp_run;
+my $expt_type;
 
 GetOptions( "help|h"      => \$help,
             "version|v"   => \$ver_info,
@@ -99,6 +97,7 @@ GetOptions( "help|h"      => \$help,
             "case|c=s"    => \$case_num,
             "randd|r"     => \$r_and_d,
             "OCP|O"       => \$ocp_run,
+            "type|t=s"    => \$expt_type,
         ) or do { print "\n$usage\n"; exit 1; };
 
 sub help {
@@ -117,19 +116,33 @@ print_version if $ver_info;
 
 my $username = $ENV{'USER'};
 
+# Format the logfile output
+$Text::Wrap::columns = 123;
+my $space = ' ' x ( length( timestamp('timestamp') ) + 3 );
+my $warn =  colored("WARN:", 'bold yellow on_black');
+my $info =  colored("INFO:", 'bold green on_black');
+my $err =   colored("ERROR:", 'bold red on_black');
+
 # Make sure that there is an appropriate Results Dir sent to script
 my $resultsDir = shift @ARGV;
+
 if ( ! defined $resultsDir ) {
-	print "No results directory was entered.  Please select the results directory to process.\n\n";
+	print "$err No results directory was entered.  Please select the results directory to process.\n\n";
 	print "$usage\n";
 	exit 1;
 } elsif ( ! -d $resultsDir ) {
-	print "The results directory '$resultsDir' can not be found.\n";
+	print "$err The results directory '$resultsDir' can not be found.\n\n";
 	exit 1;
 }
 
+# Check for experiment type to know how to deal with this later.  May combine / supercede $r_and_d.
+if ( ! $expt_type ) {
+    print "$err No experiment type defined.  Please choose 'clinical' or 'general'\n\n";
+    print "$usage\n";
+    exit 1;
+}
+
 # Get the absolute path of the target dir so that we can find it later.
-#my $outdir_path = File::Spec->rel2abs($outdir) if $outdir;
 my $outdir_path = abs_path($outdir) if $outdir;
 
 # Create logfile for archive process
@@ -139,18 +152,11 @@ open( my $log_fh, ">>", $logfile ) || die "Can't open the logfile '$logfile' for
 # Direct script messages to either a logfile or both STDOUT and a logfile
 my $msg;
 if ( $quiet ) {
-	print "Running script in quiet mode. Check the log in " . LOG_OUT ." for details\n";
+	print "$info Running script in quiet mode. Check the log in " . LOG_OUT ." for details\n";
 	$msg = $log_fh;
 } else {
     $msg = IO::Tee->new( \*STDOUT, $log_fh );
 }
-
-# Format the logfile output
-$Text::Wrap::columns = 123;
-my $space = ' ' x ( length( timestamp('timestamp') ) + 3 );
-my $warn =  colored("WARN:", 'bold yellow on_black');
-my $info =  colored("INFO:", 'bold green on_black');
-my $err =   colored("ERROR:", 'bold red on_black');
 
 ##----------------------------------------- End Command Arg Parsing ------------------------------------##
 
@@ -183,7 +189,7 @@ my @archivelist = qw{
 };
 
 # Find out what TS version running in order to customize some downstream functions
-open( my $ver_fh, "<", "$resultsDir/version.txt" ) || die "ERROR: can not open the version.txt file for reading: $!";
+open( my $ver_fh, "<", "$resultsDir/version.txt" ) || die "$err can not open the version.txt file for reading: $!";
 (my $ts_version) = map { /Torrent_Suite=(.*)/ } <$ver_fh>;
 close $ver_fh;
 
@@ -199,7 +205,7 @@ if ($ts_version >= $old_version ) {
     my ($index) = grep { $exportFileList[$_] eq 'explog_final.txt' } 0..$#exportFileList;
     splice( @exportFileList, $index, 1);
 } else {
-    print "An older version ($ts_version) was detected.  Using old paths\n";
+    print "$info An older version ($ts_version) was detected.  Using old paths\n";
 }
 
 # Generate a sampleKey.txt file for the package
@@ -222,7 +228,7 @@ elsif ($archive) {
     data_archive();
     exit;
 } else {
-	print "ERROR: You must choose archive (-a) or extract (-e) options when running this script\n\n";
+	print "$err You must choose archive (-a) or extract (-e) options when running this script\n\n";
 	print "$usage\n";
 	exit 1;
 }
@@ -338,8 +344,9 @@ sub data_archive {
     print $msg timestamp('timestamp') . " All data located.  Proceeding with archive creation\n"; 
 
     # Collect BAM files for the archive
-    my $bamzip = get_bams();
-    push(@archivelist, $bamzip);
+    # XXX: remove this for the time being for testing purposes
+    #my $bamzip = get_bams();
+    #push(@archivelist, $bamzip);
 
     if ( DEBUG_OUTPUT ) {
         print "\n==============  DEBUG  ===============\n";
@@ -349,17 +356,12 @@ sub data_archive {
 
     # Run the archive subs
     my ($status, $md5sum, $archive_dir) = archive_data( \@archivelist, $archive_name );
-    #if ( archive_data( \@archivelist, $archive_name ) == 1 ) {
     if ( $status == 1 ) {
         print $msg timestamp('timestamp') . " Archival of experiment '$output' completed successfully\n\n";
         print "Experiment archive completed successfully\n" if $quiet;
-        #send_mail( "success", \$resultsDir, \$case_num );
-        # XXX
-        # ADD: output path, md5sum
-        send_mail( "success", \$resultsDir, \$case_num, \$archive_dir, \$md5sum );
+        send_mail( "success", \$resultsDir, \$case_num, \$archive_dir, \$md5sum, \$expt_type );
     } else {
-        print $msg timestamp('timestamp') . " $err Archive creation failed for '$output'.  Check the logfiles for details\n\n";
-        #print "$err Archive creation failed for '$output'. Check /var/log/mocha/archive.log for details\n\n" if $quiet == 1;
+        print $msg timestamp('timestamp') . " $err Archive creation failed for '$output'.  Check " . LOG_OUT . " for details\n\n";
         print "$err Archive creation failed for '$output'. Check " . LOG_OUT . " for details\n\n" if $quiet;
         halt(\$resultsDir);
     }
@@ -384,7 +386,7 @@ sub get_bams {
     }
 
     # Generate a zip archive of the desired BAM files.
-    system('zip -q', $zipfile, @wanted_bams );
+    system('zip', '-q', $zipfile, @wanted_bams );
 
     return $zipfile;
 }
@@ -438,7 +440,9 @@ sub archive_data {
 	my $cwd = getcwd; 
     my $destination_dir = create_dest( $outdir_path, '/media/Aperio/' ); 
 
-    return (1, '93038889640fd9259da155b7de0755a1', 'some/directory/');
+    # XXX
+    return (0, '93038889640fd9259da155b7de0755a1', 'some/directory/');
+    exit;
 
     # Check the fileshare before we start
     mount_check(\$destination_dir);
@@ -463,7 +467,6 @@ sub archive_data {
 	print $msg timestamp('timestamp') . " Creating a tarball archive of $archivename.\n";
 
 	# Use two step tar process with 'pigz' multicore gzip utility to speed things up a bit. 
-	#if ( system( "tar -cf - @$filelist | pigz -9 -p 8 > $archivename" ) != 0 ) {
      if ( system( "tar cfz $archivename @$filelist" ) != 0 ) {
 		print $msg timestamp('timestamp') . " $err Tarball creation failed: $?.\n"; 
         halt( \$resultsDir );
@@ -559,11 +562,7 @@ sub archive_data {
 		print $msg timestamp('timestamp') . " $info The md5sum for the archive is in agreement. The local copy will now be deleted.\n";
 		unlink( $archivename );
 	}
-    # XXX
-    #
-    # Return MD5sum and outdir?
     return (1, $post_tarball_md5, $archive_dir);
-	#return 1;
 }
 
 sub timestamp {
@@ -583,6 +582,7 @@ sub timestamp {
 sub halt {
     my $expt_name = shift;
     my $code = shift;
+    $code //= 4; # If nothing, go unspecified.
 
     my %fail_codes = (
         1  => "missing files",
@@ -590,9 +590,10 @@ sub halt {
         3  => "tarball creation failure",
         4  => "unspecified error",
     );
+    
     my $error = " The archive script failed due to '" . colored($fail_codes{$code}, "bold cyan on_black") . "' and is unable to continue.\n\n"; 
 	print $msg timestamp('timestamp'), $error; 
-    send_mail( "failure", $expt_name );
+    send_mail( "failure", $expt_name, \$case_num, undef, undef, \$expt_type );
 	exit 1;
 }
 
@@ -700,6 +701,7 @@ sub send_mail {
     my $case = shift;
     my $outdir = shift;
     my $md5sum = shift;
+    my $type = shift;
     my @additional_recipients;
 
     $$case //= "---"; 
@@ -711,7 +713,7 @@ sub send_mail {
     my $template_path = dirname(abs_path($0)) . "/templates/";
     my $target = 'simsdj@mail.nih.gov';
     
-    if ( $r_and_d || DEBUG_OUTPUT ) {
+    if ( $r_and_d || $type eq 'general' || DEBUG_OUTPUT ) {
         @additional_recipients = '';
     } else {
         @additional_recipients = qw( 
@@ -722,8 +724,10 @@ sub send_mail {
     }
 
     if ( DEBUG_OUTPUT ) {
+        no strict; no warnings;
         print "============  DEBUG  ============\n";
         print "\ttime:   $time\n";
+        print "\ttype:   $$type\n";
         print "\tstatus: $status\n";
         print "\tname:   $$expt_name\n";
         print "\tcase:   $$case\n";
@@ -736,15 +740,17 @@ sub send_mail {
     # Choose template and recipient.
     my ($msg, $cc_list);
     if ( $status eq 'success' ) {
-        $msg = "$template_path/clinical_archive_success.html";
-        $cc_list = join( ";", @additional_recipients );
+        if ($$type eq 'clinical') {
+            $msg = "$template_path/clinical_archive_success.html";
+            $cc_list = join( ";", @additional_recipients );
+        }
+        elsif ($$type eq 'general') {
+            $msg = "$template_path/general_archive_success.html";
+            $cc_list = '';
+        }
     }
     elsif ( $status eq 'failure' ) {
         $msg = "$template_path/archive_failure.html";
-        $cc_list = '';
-    }
-    elsif ( $status eq 'test' ) {
-        $msg = "$template_path/test_email.html";
         $cc_list = '';
     }
 
