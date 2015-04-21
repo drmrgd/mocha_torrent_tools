@@ -2,29 +2,73 @@
   <head>
     <style type='text/css'>
       body {
-        font-family: "Verdana",sans-serif;
+        font-family: "Verdana", sans-serif;
+      }
+      #header {
+        position: relative;
+        width: 95%;
+        height: 130px;
+        line-height: 0.5;
       }
       img {
-          float: left;
+        width: 200px;
+        height: auto;
+      }
+      #title {
+        font-weight: bold;
+        font-size: 12pt;
+        margin-left: 30px;
+      }
+      #list {
+        font-style: italic;
+        font-size: 10pt;
+        margin-left: 45px;
       }
       #body_text {
-          float: right;
-          width: 100%;
-          margin: 10px,10px,10px,10px;
+          position: absolute;
+          font-size: 10pt;
+          width: 90%;
+          margin-left: 15px;
       }
       #status{
           color: red;
           font-weight: bold;
       }
-
+      #sep {
+        position: relative;
+        margin-top: 5px;
+        margin-bottom: 5px;
+      }
+      ul {
+        list-style: none;
+      }
     </style>
   </head>
   <body>
-    <div id=header>
-      <img src="https://s3.amazonaws.com/mocha_stuff/mocha_logo_small.png"/>
+    <div id="header">
+      <table>
+        <tr>
+          <td>
+            <img src="https://s3.amazonaws.com/mocha_stuff/mocha_logo_small.png"/>
+          </td>
+          <td>
+            <div id="title">
+              Data Archive Summary<br>
+            </div>
+            <div id="list">
+              <b>Expt:</b> %%EXPT%%<br>
+              <b>Date:</b> %%EXPT%%<br>
+              <b>PGM:</b> %%PGM%%<br>
+              <b>Case:</b> %%CASE_NUM%%<br>
+            </div>
+          </td>
+        </tr>
+      </table>
     </div>
-    <div id=body_text>
-      <h3>Data Archive Summary</h3>
+    <div id="sep">
+      <hr width=85%>
+    </div>
+    <div id="body_text">
       <p id=status>Archiving has failed!</p> 
       <p>
          Archive generation of <b>%%EXPT%%</b> has not completed successfully.  More detailed information on why this 
