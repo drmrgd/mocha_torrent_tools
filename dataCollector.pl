@@ -43,7 +43,7 @@ use constant LOG_OUT       => "/results/sandbox/dc-test/datacollector_dev.log";
 print colored( "\n******************************************************\n*******  DEVELOPMENT VERSION OF DATACOLLECTOR  *******\n******************************************************\n\n", "bold yellow on_black");
 
 my $scriptname = basename($0);
-my $version = "v3.5.0_042115";
+my $version = "v3.6.0_042115";
 my $description = <<"EOT";
 Program to grab data from an Ion Torrent Run and either archive it, or create a directory that can be imported 
 to another analysis computer for processing.  
@@ -275,7 +275,7 @@ sub data_extract {
     print "Creating a tarball of $output for export...\n";
 
     #if ( system( "tar -cf - $output | pigz -9 -p 8 > '${output}.tar.gz'" ) != 0 ) {
-    if ( system( "tar cfz ${output}.tar.gz $output" ) != 0 ) {
+    if ( system( "tar cfz ${output}.tar.gz $output/" ) != 0 ) {
         print "$err Tarball creation of '$output' failed.\n";
         printf "child died with signal %d, %s coredump\n", 
             ($? & 127), ($? & 128) ? 'with' : 'without';
@@ -343,10 +343,10 @@ sub data_archive {
     }
     print $msg timestamp('timestamp') . " All data located.  Proceeding with archive creation\n"; 
 
+    # XXX
     # Collect BAM files for the archive
-    # XXX: remove this for the time being for testing purposes
-    #my $bamzip = get_bams();
-    #push(@archivelist, $bamzip);
+    my $bamzip = get_bams();
+    push(@archivelist, $bamzip);
 
     if ( DEBUG_OUTPUT ) {
         print "\n==============  DEBUG  ===============\n";
@@ -441,8 +441,7 @@ sub archive_data {
     my $destination_dir = create_dest( $outdir_path, '/media/Aperio/' ); 
 
     # XXX
-    return (0, '93038889640fd9259da155b7de0755a1', 'some/directory/');
-    exit;
+    #return (1, '1afca72bb2a66827fbb3d9fb7b8769b9', 'some/dir/');
 
     # Check the fileshare before we start
     mount_check(\$destination_dir);
