@@ -40,7 +40,7 @@ use constant LOG_OUT      => "/var/log/mocha/archive.log";
 #print colored( "\n******************************************************\n*******  DEVELOPMENT VERSION OF DATACOLLECTOR  *******\n******************************************************\n\n", "bold yellow on_black");
 
 my $scriptname = basename($0);
-my $version = "v4.0.0_042315";
+my $version = "v4.0.1_042315";
 my $description = <<"EOT";
 Program to grab data from an Ion Torrent Run and either archive it, or create a directory that can be imported 
 to another analysis computer for processing.  
@@ -296,7 +296,7 @@ sub data_archive {
     my @wanted_plugins = qw( variantCaller_out 
                              varCollector_out 
                              AmpliconCoverageAnalysis_out 
-                             CoverageAnalysis_out
+                             coverageAnalysis_out
                            );
 
     for my $plugin_data (@plugin_results) {
@@ -326,7 +326,7 @@ sub data_archive {
             log_msg(" $warn No AmpliconCoverageAnalysisData. Skipping...\n");
         } 
     }
-    if ( ! grep { /CoverageAnalysis_out/ } @archivelist ) {
+    if ( ! grep { /coverageAnalysis_out/ } @archivelist ) {
         if ( $ocp_run ) {
             log_msg(" $err CoverageAnalysis data is missing.\n");
             halt(\$expt_dir, 1);
