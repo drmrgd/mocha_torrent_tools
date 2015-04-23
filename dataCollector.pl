@@ -10,11 +10,6 @@
 # the copied archive is compared to the original to make sure it did not get corrupted during the transfer
 # and if successful the local copy is deleted.
 #
-# TODO: 
-#     - Tests:
-#         1. OCP Run
-#         2. MPACT Run
-#
 # 4/12/13 - D Sims
 ############################################################################################################
 use warnings;
@@ -22,28 +17,30 @@ use strict;
 use version;
 use autodie;
 
-use File::Copy;
 use File::Basename;
 use IO::Tee;
 use POSIX qw(strftime);
 use Text::Wrap;
 use Term::ANSIColor;
-use Cwd;
-use Cwd qw(abs_path);
+use Cwd qw(abs_path getcwd);
 use Digest::MD5;
+use File::Copy;
 use File::Path qw(remove_tree);
 use Getopt::Long qw(:config bundling auto_abbrev no_ignore_case);
 use Data::Dump;
+use File::Slurp;
+use Email::MIME;
+use Email::Sender::Simple qw(sendmail);
 
-use constant DEBUG_OUTPUT => 1;
+use constant DEBUG_OUTPUT => 0;
 #use constant LOG_OUT      => "$ENV{'HOME'}/datacollector_dev.log";
-use constant LOG_OUT       => "/results/sandbox/dc-test/datacollector_dev.log";
-#use constant LOG_OUT      => "/var/log/mocha/archive.log";
+#use constant LOG_OUT      => "/results/sandbox/dc-test/datacollector_dev.log";
+use constant LOG_OUT      => "/var/log/mocha/archive.log";
 
-print colored( "\n******************************************************\n*******  DEVELOPMENT VERSION OF DATACOLLECTOR  *******\n******************************************************\n\n", "bold yellow on_black");
+#print colored( "\n******************************************************\n*******  DEVELOPMENT VERSION OF DATACOLLECTOR  *******\n******************************************************\n\n", "bold yellow on_black");
 
 my $scriptname = basename($0);
-my $version = "v3.6.0_042115";
+my $version = "v4.0.0_042315";
 my $description = <<"EOT";
 Program to grab data from an Ion Torrent Run and either archive it, or create a directory that can be imported 
 to another analysis computer for processing.  
@@ -81,8 +78,8 @@ my $archive;
 my $extract;
 my $output;
 my $quiet;
-my $outdir = '';
-my $case_num = '';
+my $outdir;
+my $case_num;
 my $r_and_d;
 my $ocp_run;
 my $expt_type;
@@ -116,6 +113,10 @@ print_version if $ver_info;
 
 my $username = $ENV{'USER'};
 
+my $var1 = 'testing';
+my $var2 = 'there_is_no_data_only_testing!';
+
+
 # Format the logfile output
 $Text::Wrap::columns = 123;
 my $space = ' ' x ( length( timestamp('timestamp') ) + 3 );
@@ -142,8 +143,9 @@ if ( ! $expt_type ) {
     exit 1;
 }
 
-# Get the absolute path of the target dir so that we can find it later.
+# Get the absolute path of the target and starting dirs to make it easier.
 my $outdir_path = abs_path($outdir) if $outdir;
+my $expt_dir = abs_path($resultsDir);
 
 # Create logfile for archive process
 my $logfile = LOG_OUT;
@@ -156,6 +158,13 @@ if ( $quiet ) {
 	$msg = $log_fh;
 } else {
     $msg = IO::Tee->new( \*STDOUT, $log_fh );
+}
+
+sub log_msg {
+    # Set up logger print statements to make typing easier later!
+    my $text = shift;
+    print $msg timestamp('timestamp') . $text;
+    return;
 }
 
 ##----------------------------------------- End Command Arg Parsing ------------------------------------##
@@ -188,36 +197,8 @@ my @archivelist = qw{
     sysinfo.txt
 };
 
-# Find out what TS version running in order to customize some downstream functions
-open( my $ver_fh, "<", "$resultsDir/version.txt" ) || die "$err can not open the version.txt file for reading: $!";
-(my $ts_version) = map { /Torrent_Suite=(.*)/ } <$ver_fh>;
-close $ver_fh;
-
-# Looks like location of Bead_density files has moved in 4.2.1.
-my $old_version = version->parse('4.2.1');
-my $curr_version = version->parse($ts_version);
-
-if ($ts_version >= $old_version ) { 
-    print "TSv4.2+ detected.  Making file and path adjustments...\n";
-    print "\tModifying path for Bead_density_data...\n";
-    map { (/Bead/) ? ($_ = basename($_)) : $_ } @exportFileList;
-    print "\tRemoving request for explog_final.txt from list...\n";
-    my ($index) = grep { $exportFileList[$_] eq 'explog_final.txt' } 0..$#exportFileList;
-    splice( @exportFileList, $index, 1);
-} else {
-    print "$info An older version ($ts_version) was detected.  Using old paths\n";
-}
-
-# Generate a sampleKey.txt file for the package
-print "Generating a sampleKey.txt file for the export package...\n";
-eval { system( "cd $resultsDir && sampleKeyGen -o sampleKey.txt" ) };
-if ($@) {
-    print "$err SampleKeyGen Script encountered errors: $@\n";
-    exit 1;
-}
-
 # Setup custom and default output names
-my ( $run_name ) = $resultsDir =~ /([MP]C[C123]-\d+.*_\d+)\/?$/;;
+my ( $run_name ) = $expt_dir =~ /([MP]C[C123]-\d+.*_\d+)\/?$/;;
 $output = "$run_name." . timestamp('date') if ( ! defined $output );
 
 if ($extract) {
@@ -235,14 +216,20 @@ elsif ($archive) {
 
 sub data_extract {
     # Run the export subroutine for pushing data to a different server
-    my $destination_dir = create_dest( $outdir_path, '/results/xfer/' );
 
-    print "Creating a copy of data in '$destination_dir from '$resultsDir' for export...\n";
+    # Generate a sample key file for the package
+    sample_key_gen();
+
+    # Check to see what version of TSS we have an modify the paths accordingly.
+    version_check();
+
+    my $destination_dir = create_dest( $outdir_path, '/results/xfer/' );
+    print "Creating a copy of data in '$destination_dir from '$expt_dir' for export...\n";
     system( "mkdir -p $destination_dir/$output/sigproc_results/" );
     my $sigproc_out = "$destination_dir/$output/sigproc_results/";
 
     # Add 'analysis_return_code' file to be compatible with TSv3.4+
-    if ( ! -e "$resultsDir/sigproc_results/analysis_return_code.txt" ) {
+    if ( ! -e "$expt_dir/sigproc_results/analysis_return_code.txt" ) {
         print "No analysis_return_code.txt file found.  Creating one to be compatible with TSv3.4+\n";
         my $arc_file = "$sigproc_out/analysis_return_code.txt";
         open( my $arc_fh, ">", $arc_file ) 
@@ -264,9 +251,9 @@ sub data_extract {
     # Copy run data for re-analysis
     for ( @exportFileList ) {
         if ( ! /^sigproc/ && ! /^Bead/ ) {
-            copy_data( "$resultsDir/$_", "$destination_dir/$output" );
+            copy_data( "$expt_dir/$_", "$destination_dir/$output" );
         } else {
-            copy_data( "$resultsDir/$_", "$sigproc_out" );
+            copy_data( "$expt_dir/$_", "$sigproc_out" );
         }
     }
 
@@ -274,7 +261,6 @@ sub data_extract {
     chdir( $destination_dir );
     print "Creating a tarball of $output for export...\n";
 
-    #if ( system( "tar -cf - $output | pigz -9 -p 8 > '${output}.tar.gz'" ) != 0 ) {
     if ( system( "tar cfz ${output}.tar.gz $output/" ) != 0 ) {
         print "$err Tarball creation of '$output' failed.\n";
         printf "child died with signal %d, %s coredump\n", 
@@ -291,11 +277,18 @@ sub data_extract {
 sub data_archive {
     # Run full archive on data.
 
-    chdir( $resultsDir ) || die "Can not access the results directory selected: $resultsDir. $!";
+    chdir( $expt_dir ) || die "Can not access the results directory '$expt_dir': $!";
     my $archive_name = "$output.tar.gz";
-    print $msg timestamp('timestamp') . " $username has started archive on '$output'.\n";
-    print $msg timestamp('timestamp') . " $info Running in R&D mode.\n" if $r_and_d;
-    
+    log_msg(" $username has started archive on '$output'.\n");
+    log_msg(" $info Running in R&D mode.\n") if $r_and_d;
+
+
+    # Check to see what version of TSS we have and modify the path of the data accordingly.
+    version_check();
+
+    # Generate a sample key file;
+    sample_key_gen();
+
     # Get listing of plugin results to compare; have to deal with random numbered dirs now
     opendir( my $plugin_dir, "plugin_out" ); 
     my @plugin_results = sort( grep { !/^[.]+$/ } readdir( $plugin_dir) );
@@ -314,36 +307,35 @@ sub data_archive {
     # Check to be sure that all of the results logs are there or exit so we don't miss anything
     if ( ! grep { /variantCaller_out/ } @archivelist ) {
         if ( $r_and_d || $ocp_run ) {
-            print $msg timestamp('timestamp') . " $warn No TVC results directory.  Skipping...\n";
+            log_msg(" $warn No TVC results directory. Skipping...\n");
         } else {
-            print $msg timestamp('timestamp') . " $err TVC results directory is missing. Did you run TVC?\n";
-            halt(\$resultsDir, 1);
+            log_msg(" $err TVC results directory is missing. Did you run TVC?\n");
+            halt(\$expt_dir, 1);
         }
     }
     if ( ! grep { /varCollector/ } @archivelist ) {
         if ( $r_and_d || $ocp_run ) {
-            print $msg timestamp('timestamp') . " $warn No varCollector plugin data. Skipping...\n";
+            log_msg(" $warn No varCollector plugin data. Skipping...\n");
         } else {
-            print $msg timestamp('timestamp') . " $err No varCollector plugin data. Was varCollector run?\n";
-            halt(\$resultsDir, 1);
+            log_msg(" $err No varCollector plugin data. Was varCollector run?\n");
+            halt(\$expt_dir, 1);
         }
     }
     if ( ! grep { /AmpliconCoverageAnalysis_out/ } @archivelist ) {
         if ( $r_and_d || $ocp_run ) {
-            print $msg timestamp('timestamp') . " $warn No AmpliconCoverageAnalysisData. Skipping...\n"; 
+            log_msg(" $warn No AmpliconCoverageAnalysisData. Skipping...\n");
         } 
     }
     if ( ! grep { /CoverageAnalysis_out/ } @archivelist ) {
         if ( $ocp_run ) {
-            print $msg timestamp('timestamp') . " $err CoverageAnalysis data is missing.\n"; 
-            halt(\$resultsDir, 1);
+            log_msg(" $err CoverageAnalysis data is missing.\n");
+            halt(\$expt_dir, 1);
         } else {
-            print $msg timestamp('timestamp') . " $warn No CoverageAnalysis. Skipping...\n"; 
+            log_msg(" $warn No CoverageAnalysis. Skipping...\n");
         }
     }
-    print $msg timestamp('timestamp') . " All data located.  Proceeding with archive creation\n"; 
+    log_msg(" All data located.  Proceeding with archive creation\n");
 
-    # XXX
     # Collect BAM files for the archive
     my $bamzip = get_bams();
     push(@archivelist, $bamzip);
@@ -357,19 +349,57 @@ sub data_archive {
     # Run the archive subs
     my ($status, $md5sum, $archive_dir) = archive_data( \@archivelist, $archive_name );
     if ( $status == 1 ) {
-        print $msg timestamp('timestamp') . " Archival of experiment '$output' completed successfully\n\n";
+        log_msg(" Archival of experiment '$output' completed successfully\n\n");
         print "Experiment archive completed successfully\n" if $quiet;
-        send_mail( "success", \$resultsDir, \$case_num, \$archive_dir, \$md5sum, \$expt_type );
+        send_mail( "success", \$case_num, \$archive_dir, \$md5sum, \$expt_type );
     } else {
-        print $msg timestamp('timestamp') . " $err Archive creation failed for '$output'.  Check " . LOG_OUT . " for details\n\n";
+        log_msg(" $err Archive creation failed for '$output'.  Check " . LOG_OUT . " for details\n\n");
         print "$err Archive creation failed for '$output'. Check " . LOG_OUT . " for details\n\n" if $quiet;
-        halt(\$resultsDir);
+        halt(\$expt_dir, 4);
     }
+}
+
+sub version_check {
+    # Find out what TS version running in order to customize some downstream functions
+
+    log_msg(" $info Checking TSS version for file path info...\n");
+
+    open( my $ver_fh, "<", "version.txt" ) || die "$err can not open the version.txt file for reading: $!";
+    (my $ts_version) = map { /Torrent_Suite=(.*)/ } <$ver_fh>;
+    close $ver_fh;
+
+    # Looks like location of Bead_density files has moved in 4.2.1.
+    my $old_version = version->parse('4.2.1');
+    my $curr_version = version->parse($ts_version);
+
+    if ($ts_version >= $old_version ) { 
+        log_msg(colored(" TSv4.2+ run detected. Making file and path adjustments...\n", "bold cyan on_black"));
+        log_msg( "\tModifying path for Bead_density_data...\n" );
+        map { (/Bead/) ? ($_ = basename($_)) : $_ } @exportFileList;
+        log_msg( "\tRemoving request for explog_final.txt from list...\n" );
+        my ($index) = grep { $exportFileList[$_] eq 'explog_final.txt' } 0..$#exportFileList;
+        splice( @exportFileList, $index, 1);
+    } else {
+        log_msg(" $info An older version ($ts_version) was detected. Using old paths\n");
+    }
+
+    return;
+}
+
+sub sample_key_gen {
+    # Generate a sampleKey.txt file for the package
+    log_msg(" Generating a sampleKey.txt file for the export package...\n" );
+    eval { system( "cd $expt_dir && sampleKeyGen -o sampleKey.txt" ) };
+    if ($@) {
+        log_msg(" $err SampleKeyGen Script encountered errors: $@\n");
+        halt( \$expt_dir, 1);
+    }
+    return;
 }
 
 sub get_bams {
     # Generate a zipfile of BAMs generated for each samle for the archive
-    my $zipfile = basename($resultsDir) . "_library_bams.zip";
+    my $zipfile = basename($expt_dir) . "_library_bams.zip";
 
     open( my $sample_key, "<", "sampleKey.txt" );
     my %samples = map{ chomp; split(/\t/) } <$sample_key>;
@@ -386,6 +416,7 @@ sub get_bams {
     }
 
     # Generate a zip archive of the desired BAM files.
+    log_msg(" Generating a ZIP archive of BAM files for the package...\n");
     system('zip', '-q', $zipfile, @wanted_bams );
 
     return $zipfile;
@@ -404,7 +435,7 @@ sub create_dest {
         while (1) {
             print "(c)reate, (n)ew directory, (q)uit: ";
             chomp( my $resp = <STDIN> );
-            if ( $resp !~  /[cnq]/ ) {
+            if ( $resp !~ /[cnq]/ ) {
                 print "$err Not a valid response.\n";
             }
             elsif ( $resp eq 'c' ) {
@@ -440,9 +471,6 @@ sub archive_data {
 	my $cwd = getcwd; 
     my $destination_dir = create_dest( $outdir_path, '/media/Aperio/' ); 
 
-    # XXX
-    #return (1, '1afca72bb2a66827fbb3d9fb7b8769b9', 'some/dir/');
-
     # Check the fileshare before we start
     mount_check(\$destination_dir);
 
@@ -455,64 +483,65 @@ sub archive_data {
     }
     
 	# Create a checksum file for all of the files in the archive and add it to the tarball 
-	print $msg timestamp('timestamp') . " Creating an md5sum list for all archive files.\n";
+	log_msg(" Creating an md5sum list for all archive files.\n");
+
 	if ( -e 'md5sum.txt' ) {
-		print $msg timestamp('timestamp') . " $info md5sum.txt file already exists in this directory.  Deleting and creating fresh list.\n";
+		log_msg(" $info md5sum.txt file already exists in this directory. Creating fresh list.\n");
 		unlink( 'md5sum.txt' );
 	}
 	process_md5_files( $filelist );
 	push( @$filelist, 'md5sum.txt' );
 
-	print $msg timestamp('timestamp') . " Creating a tarball archive of $archivename.\n";
-
-	# Use two step tar process with 'pigz' multicore gzip utility to speed things up a bit. 
-     if ( system( "tar cfz $archivename @$filelist" ) != 0 ) {
-		print $msg timestamp('timestamp') . " $err Tarball creation failed: $?.\n"; 
-        halt( \$resultsDir );
+	log_msg(" Creating a tarball archive of $archivename.\n");
+    if ( system( "tar cfz $archivename @$filelist" ) != 0 ) {
+		log_msg(" $err Tarball creation failed: $!.\n");
+        printf "child died with signal %d, %s coredump\n", 
+            ($? & 127), ($? & 128) ? 'with' : 'without';
+        halt( \$expt_dir, 3 );
 	} else {
-		print $msg timestamp('timestamp') . " $info Tarball creation was successful.\n";
+		log_msg(" $info Tarball creation was successful.\n");
 	}
 
 	# Uncompress archive in /tmp dir and check to see that md5sum matches.
 	my $tmpdir = "/tmp/mocha_archive";
 	if ( -d $tmpdir ) {
-		print $msg timestamp('timestamp') . " $warn found mocha_tmp directory already.  Cleaning up to make way for new one\n";
+		log_msg(" $warn found mocha_tmp directory already.  Cleaning up to make way for new one\n");
 		remove_tree( $tmpdir );
 	} 
 	
 	mkdir( $tmpdir );
 	
-	print $msg timestamp('timestamp') . " Uncompressing tarball in '$tmpdir' for integrity check.\n";
+	log_msg(" Uncompressing tarball in '$tmpdir' for integrity check.\n");
 	if ( system( "tar xfz $archivename -C $tmpdir" ) != 0 ) {
-		print $msg timestamp('timestamp') . " $warn Can not copy tarball to '/tmp'. $?\n";
+		log_msg(" $warn Can not copy tarball to '/tmp'. $?\n");
 		return 0;
 	}
 	
 	# Check md5sum of archive against generated md5sum.txt file
 	chdir( $tmpdir );
-    print $msg timestamp('timestamp') . " Confirming MD5sum of tarball.\n";
+    log_msg(" Confirming MD5sum of tarball.\n");
 	my $md5check = system( "md5sum -c 'md5sum.txt' >/dev/null" );
 
 	if ( $? == 0 ) {
-		print $msg timestamp('timestamp') . " The archive is intact and not corrupt\n";
+		log_msg(" The archive is intact and not corrupt\n");
 		chdir( $cwd ) || die "Can't change directory to '$cwd': $!";
-        print $msg timestamp('timestamp') . " Removing the tmp data\n";
+        log_msg(" Removing the tmp data\n");
 		remove_tree( $tmpdir );
 	} 
 	elsif ( $? == 1 ) {
-		print $msg timestamp('timestamp') . " $err There was a problem with the archive integrity.  Archive creation halted.\n";
+		log_msg(" $err There was a problem with the archive integrity.  Archive creation halted.\n");
 		chdir( $cwd ) || die "Can't change dir back to '$cwd': $!";
 		remove_tree( $tmpdir );
 		return 0;
 	} else {
-		print $msg timestamp('timestamp') . " $err An error with the md5sum check was encountered: $?\n";
+		log_msg(" $err An error with the md5sum check was encountered: $?\n");
 		chdir( $cwd ) || die "Can't change dir back to '$cwd': $!";
 		remove_tree( $tmpdir );
 		return 0;
 	}
 	
 	# Get md5sum for tarball prior to moving.
-	print $msg timestamp('timestamp') . " Getting MD5 hash for tarball prior to copying.\n";
+	log_msg(" Getting MD5 hash for tarball prior to copying.\n");
 	open( my $pre_fh, "<", $archivename ) || die "Can't open the archive tarball for reading: $!";
 	binmode( $pre_fh );
 	my $init_tarball_md5 = Digest::MD5->new->addfile($pre_fh)->hexdigest;
@@ -522,7 +551,7 @@ sub archive_data {
         print "\tMD5 Hash = " . $init_tarball_md5 . "\n"; 
         print "======================================\n\n";
     }
-	print $msg timestamp('timestamp') . " Copying archive tarball to '$archive_dir'.\n"; 
+	log_msg(" Copying archive tarball to '$archive_dir'.\n");
 	
     if ( DEBUG_OUTPUT ) {
         print "\n==============  DEBUG  ===============\n";
@@ -532,14 +561,14 @@ sub archive_data {
     }
 
 	if ( copy( $archivename, $archive_dir ) == 0 ) {
-		print $msg timestamp('timestamp') . " Copying archive to storage device: $!.\n"; 
+		log_msg(" Copying archive to storage device: $!.\n");
 		return 0;
 	} else {
-		print $msg timestamp('timestamp') . " $info Archive successfully copied to archive storage device.\n";
+		log_msg(" $info Archive successfully copied to archive storage device.\n");
 	}
 
 	# check integrity of the tarball
-	print $msg timestamp('timestamp') . " Calculating MD5 hash for copied archive.\n";
+	log_msg(" Calculating MD5 hash for copied archive.\n");
     my $moved_archive = "$archive_dir/$archivename";
 
 	open( my $post_fh, "<", $moved_archive ) || die "Can't open the archive tarball for reading: $!";
@@ -553,12 +582,12 @@ sub archive_data {
         print "======================================\n\n";
     }
 
-	print $msg timestamp('timestamp') . " Comparing the MD5 hash value for local and fileshare copies of archive.\n";
+	log_msg(" Comparing the MD5 hash value for local and fileshare copies of archive.\n");
 	if ( $init_tarball_md5 ne $post_tarball_md5 ) {
-		print $msg timestamp('timestamp') . " $err The md5sum for the archive does not agree after moving to the storage location. Retry the transfer manually\n";
+		log_msg(" $err The md5sum for the archive does not agree after moving to the storage location. Retry the transfer manually\n");
 		return 0;
 	} else {
-		print $msg timestamp('timestamp') . " $info The md5sum for the archive is in agreement. The local copy will now be deleted.\n";
+		log_msg(" $info The md5sum for the archive is in agreement. The local copy will now be deleted.\n");
 		unlink( $archivename );
 	}
     return (1, $post_tarball_md5, $archive_dir);
@@ -589,10 +618,10 @@ sub halt {
         3  => "tarball creation failure",
         4  => "unspecified error",
     );
+    my $error = colored($fail_codes{$code}, 'bold cyan on_black');
     
-    my $error = " The archive script failed due to '" . colored($fail_codes{$code}, "bold cyan on_black") . "' and is unable to continue.\n\n"; 
-	print $msg timestamp('timestamp'), $error; 
-    send_mail( "failure", $expt_name, \$case_num, undef, undef, \$expt_type );
+    log_msg(" The archive script failed due to '$error' and is unable to continue.\n\n");
+    send_mail( "failure", \$case_num, undef, undef, \$expt_type );
 	exit 1;
 }
 
@@ -603,12 +632,12 @@ sub mount_check {
 
     open ( my $mount_fh, "<", '/proc/mounts' ) || die "Can't open '/proc/mounts' for reading: $!";
     if ( grep { /$$mount_point/ } <$mount_fh> ) {
-        print $msg timestamp('timestamp') . " The remote fileshare is mounted and accessible.\n";
+        log_msg(" The remote fileshare is mounted and accessible.\n");
     } 
     elsif ( -e $$mount_point && dirname($$mount_point) ne '/media' ) {
-        print $msg timestamp('timestamp') . " The remote fileshare is mounted and accessible.\n";
+        log_msg(" The remote fileshare is mounted and accessible.\n");
     } else {
-        print $msg timestamp('timestamp') . " $err The remove fileshare is not mounted! You must mount this share before proceeding.\n";
+        log_msg(" $err The remove fileshare is not mounted! You must mount this share before proceeding.\n");
     }
 }
 
@@ -649,16 +678,9 @@ sub md5sum {
 		close( $input_fh );
 	};
 
-    if ( DEBUG_OUTPUT ) {
-        print "\n==============  DEBUG  ===============\n";
-        print "\tProcessing file: $file\n";
-        print "\tret code: $@\n";
-        print "======================================\n\n";
-    }
-
 	if ( $@ ) {
-		print $msg timestamp('timestamp') . " $@\n";
-        halt(\$resultsDir);
+		log_msg(" $@\n");
+        halt(\$expt_dir, 2);
 	}
 }
 
@@ -674,29 +696,23 @@ sub create_archive_dir {
         print "======================================\n\n";
     }
 
-    print $msg timestamp('timestamp') . " $info No case number assigned for this archive.\n" unless $$case; 
-    print $msg timestamp('timestamp') . " $err The path '$$path' does not exist.  Can not continue!\n" unless ( -e $$path );
+    log_msg(" $info No case number assigned for this archive.\n") unless $$case; 
+    log_msg(" $err The path '$$path' does not exist.  Can not continue!\n") unless ( -e $$path );
 
     my $archive_dir = "$$path/$$case";
 
     if ( -e $archive_dir ) {
-        print $msg timestamp('timestamp') . " $warn Directory '$archive_dir' already exists. Adding data to '$archive_dir'.\n";
+        log_msg(" $warn Directory '$archive_dir' already exists. Adding data to '$archive_dir'.\n");
     } else {
-        print $msg timestamp('timestamp') . " Creating subdirectory '$archive_dir' to put archive into...\n";
+        log_msg(" Creating subdirectory '$archive_dir' to put archive into...\n");
         mkdir( "$archive_dir" ) || die "$err Can not create an archive directory in '$$path'";
     }
     return $archive_dir;
 }
 
-# XXX
 sub send_mail {
     # Send out a system email upon error or completion of archive
-    use File::Slurp;
-    use Email::MIME;
-    use Email::Sender::Simple qw( sendmail );
-
     my $status = shift;
-    my $expt_name = shift;
     my $case = shift;
     my $outdir = shift;
     my $md5sum = shift;
@@ -704,8 +720,7 @@ sub send_mail {
     my @additional_recipients;
 
     $$case //= "---"; 
-    $$expt_name =~ s/\/$//;
-    my ($pgm_name) = $$expt_name =~ /([PM]C[123C]-\d+)/;
+    my ($pgm_name) = $run_name =~ /([PM]C[123C]-\d+)/;
     $pgm_name //= 'Unknown';
     (my $time = timestamp('timestamp')) =~ s/[\[\]]//g;
 
@@ -722,13 +737,16 @@ sub send_mail {
         );
     }
 
+    # Get the hostname for the 'from' line in the email header.
+    chomp(my $hostname = qx(hostname -s));
+
     if ( DEBUG_OUTPUT ) {
         no strict; no warnings;
         print "============  DEBUG  ============\n";
         print "\ttime:   $time\n";
         print "\ttype:   $$type\n";
         print "\tstatus: $status\n";
-        print "\tname:   $$expt_name\n";
+        print "\tname:   $run_name\n";
         print "\tcase:   $$case\n";
         print "\tpath:   $$outdir\n";
         print "\tmd5sum: $$md5sum\n";
@@ -756,7 +774,7 @@ sub send_mail {
     my $content = read_file($msg);
     # Replace dummy fields with specific data in the message template.
     $content =~ s/%%CASE_NUM%%/$$case/g;
-    $content =~ s/%%EXPT%%/$$expt_name/g;
+    $content =~ s/%%EXPT%%/$run_name/g;
     $content =~ s/%%PATH%%/$$outdir/g;
     $content =~ s/%%PGM%%/$pgm_name/g;
     $content =~ s/%%MD5%%/$$md5sum/g;
@@ -764,10 +782,10 @@ sub send_mail {
 
     my $message = Email::MIME->create(
         header_str => [
-            From     => 'ionadmin@mcc-clia.ncifcrf.gov',
+            From     => 'ionadmin@'.$hostname.'.ncifcrf.gov',
             To       => $target,
             Cc       => $cc_list, 
-            Subject  => "Archive Summary for $$expt_name",
+            Subject  => "Archive Summary for $run_name",
             ],
             attributes  => {
                 encoding      => 'quoted-printable',
