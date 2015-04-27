@@ -40,7 +40,7 @@ use constant LOG_OUT      => "/var/log/mocha/archive.log";
 #print colored( "\n******************************************************\n*******  DEVELOPMENT VERSION OF DATACOLLECTOR  *******\n******************************************************\n\n", "bold yellow on_black");
 
 my $scriptname = basename($0);
-my $version = "v4.0.1_042315";
+my $version = "v4.0.2_042715";
 my $description = <<"EOT";
 Program to grab data from an Ion Torrent Run and either archive it, or create a directory that can be imported 
 to another analysis computer for processing.  
@@ -327,7 +327,7 @@ sub data_archive {
         } 
     }
     if ( ! grep { /coverageAnalysis_out/ } @archivelist ) {
-        if ( $ocp_run ) {
+        if ( $ocp_run && ! $r_and_d ) {
             log_msg(" $err CoverageAnalysis data is missing.\n");
             halt(\$expt_dir, 1);
         } else {
