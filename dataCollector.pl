@@ -40,7 +40,7 @@ use constant LOG_OUT      => "/var/log/mocha/archive.log";
 #print colored( "\n******************************************************\n*******  DEVELOPMENT VERSION OF DATACOLLECTOR  *******\n******************************************************\n\n", "bold yellow on_black");
 
 my $scriptname = basename($0);
-my $version = "v4.0.3_042915";
+my $version = "v4.1.0_042915";
 my $description = <<"EOT";
 Program to grab data from an Ion Torrent Run and either archive it, or create a directory that can be imported 
 to another analysis computer for processing.  
@@ -376,11 +376,29 @@ sub version_check {
         log_msg(colored(" TSv4.2+ run detected. Making file and path adjustments...\n", "bold cyan on_black"));
         log_msg( "\tModifying path for Bead_density_data...\n" );
         map { (/Bead/) ? ($_ = basename($_)) : $_ } @exportFileList;
-        log_msg( "\tRemoving request for explog_final.txt from list...\n" );
-        my ($index) = grep { $exportFileList[$_] eq 'explog_final.txt' } 0..$#exportFileList;
-        splice( @exportFileList, $index, 1);
+        # TODO Remove this. May not be the right way to do this.
+        # I don't think this is the correct assumption.  Sometimes it's just in the pgm_logs.zip file. 
+        # Try to handle that way.
+        #log_msg( "\tRemoving request for explog_final.txt from list...\n" );
+        #my ($index) = grep { $exportFileList[$_] eq 'explog_final.txt' } 0..$#exportFileList;
+        #splice( @exportFileList, $index, 1);
     } else {
         log_msg(" $info An older version ($ts_version) was detected. Using old paths\n");
+    }
+
+    # Check to see if there is a 'explog_final.txt' file in cwd or else try to get one from the 
+    # pgm_logs.zip
+    if ( ! -e "$expt_dir/explog_final.txt" ) {
+        log_msg(" $warn No explog_final.txt in $expt_dir. Attempting to get from pgm_logs.zip...\n");
+        if ( ! qx( unzip -j pgm_logs.zip explog_final.txt ) ) {
+            log_msg(" $err Can not extract explog_final.txt from the pgm_logs. Can not continue!\n");
+            halt( \$expt_dir, 1 );
+        } else {
+            log_msg(" $info Successfully retrieved the explog_final.txt file from the pgm_log.zip file\n");
+        }
+    } else {
+        # Do we want to be able to continue without?  
+        ;
     }
 
     return;
