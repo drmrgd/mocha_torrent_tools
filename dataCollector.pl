@@ -40,7 +40,7 @@ use constant LOG_OUT      => "/var/log/mocha/archive.log";
 #print colored( "\n******************************************************\n*******  DEVELOPMENT VERSION OF DATACOLLECTOR  *******\n******************************************************\n\n", "bold yellow on_black");
 
 my $scriptname = basename($0);
-my $version = "v4.0.2_042715";
+my $version = "v4.0.3_042915";
 my $description = <<"EOT";
 Program to grab data from an Ion Torrent Run and either archive it, or create a directory that can be imported 
 to another analysis computer for processing.  
@@ -618,10 +618,10 @@ sub halt {
         3  => "tarball creation failure",
         4  => "unspecified error",
     );
-    my $error = colored($fail_codes{$code}, 'bold cyan on_black');
-    
+    my $error = colored($fail_codes{$code}, 'bold red on_black');
+
     log_msg(" The archive script failed due to '$error' and is unable to continue.\n\n");
-    send_mail( "failure", \$case_num, undef, undef, \$expt_type );
+    send_mail( "failure", \$case_num, \$expt_name, undef, \$expt_type );
 	exit 1;
 }
 
@@ -736,6 +736,7 @@ sub send_mail {
         patricia.runge@nih.gov
         );
     }
+    $$md5sum //= '---';
 
     # Get the hostname for the 'from' line in the email header.
     chomp(my $hostname = qx(hostname -s));
