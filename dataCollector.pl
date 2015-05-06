@@ -40,7 +40,7 @@ use constant LOG_OUT      => "/var/log/mocha/archive.log";
 #print colored( "\n******************************************************\n*******  DEVELOPMENT VERSION OF DATACOLLECTOR  *******\n******************************************************\n\n", "bold yellow on_black");
 
 my $scriptname = basename($0);
-my $version = "v4.1.0_042915";
+my $version = "v4.1.1_050615";
 my $description = <<"EOT";
 Program to grab data from an Ion Torrent Run and either archive it, or create a directory that can be imported 
 to another analysis computer for processing.  
@@ -137,7 +137,7 @@ if ( ! defined $resultsDir ) {
 }
 
 # Check for experiment type to know how to deal with this later.  May combine / supercede $r_and_d.
-if ( ! $expt_type ) {
+if ( $expt_type ne 'general' && $expt_type ne 'clinical' ) {
     print "$err No experiment type defined.  Please choose 'clinical' or 'general'\n\n";
     print "$usage\n";
     exit 1;
