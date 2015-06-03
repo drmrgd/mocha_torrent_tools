@@ -15,10 +15,9 @@ use Term::ANSIColor;
 use Data::Dump;
 
 my $scriptname = basename($0);
-my $version = "v1.0.040115";
+my $version = "v1.1.0_060315";
 my $description = <<"EOT";
-Create a batch run plan for an Ion Torrent Reanalysis.  This script will just use barcodes 001 - 032 to
-create the template necessary for a batch upload to the Torrent Browser run plan API.  For now the rest
+Create the template necessary for a batch upload to the Torrent Browser run plan API.  For now the rest
 of the necessary data (plugins, params, etc) are missing.  But, you can cut and paste this into the CSV
 file that is generated from the TB and start from there.
 EOT
@@ -103,7 +102,9 @@ for ( my $num = 1; $num <= 96; $num++ ) {
     push( @bc_list, $barcode );
     for my $run ( keys %data ) {
         if ( $data{$run}->{$barcode} ) {
-            $agg_data{$run}->{$barcode} = $data{$run}->{$barcode};
+            #$agg_data{$run}->{$barcode} = $data{$run}->{$barcode};
+            (my $sample = $data{$run}->{$barcode}) =~ s/\s/_/g;
+            $agg_data{$run}->{$barcode} = $sample;
         } else {
             $agg_data{$run}->{$barcode} = '';
         }
@@ -125,7 +126,8 @@ print "\n";
 
 # print out the run data
 for my $run( sort keys %agg_data ) {
-    print $run . $delim;
+
+    print "${prefix}_$run" . $delim;
     for my $barcode ( sort keys %{$agg_data{$run}} ) {
         print $agg_data{$run}->{$barcode} . $delim;
     }
