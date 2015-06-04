@@ -21,7 +21,7 @@ use Term::ANSIColor;
 use File::Basename;
 
 my $scriptname = basename($0);
-my $version = "v1.0.010115";
+my $version = "v1.1.060415";
 my $description = <<"EOT";
 After pulling out a planned experiments dump of the SQL database, batch run change of plans on a 
 list of experiments input into the program in preparation for reanalysis.
@@ -90,9 +90,14 @@ close $sql_fh;
 # Get list of runs to process, and add the full path
 my @runs_list = map{ abs_path($_) } @ARGV;
 
+#dd \@runs_list;
+#exit;
+
+print "prefix: $prefix\n";
+
 for my $run ( @runs_list ) {
     chdir($run) or die "ERROR: Can't stat '$run': $!";
-    (my $new_name = basename($run)) =~ s/(.*?)\.\d{8}?/${prefix}_$1/;
+    (my $new_name = basename($run)) =~ s/(.*?)(?:\.\d{8})?/${prefix}_$1/;
 
     my $new_sid = $plan_data{$new_name}->{short_id};
     my $new_guid = $plan_data{$new_name}->{guid};
