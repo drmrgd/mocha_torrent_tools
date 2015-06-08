@@ -2,11 +2,11 @@
 # This script will automatically back up the data in /results/analysis/output/Home to the external storage drive 
 # connected to the Torrent Server.  This script is intended to be called from cron for nightly rolling backups.
 #
-# 12/2/2013 v1.1.0 - updated script.  Instead of using [PM]CC-\d+ numbers for runs to backup, use the report number.
-#                    This will allow for non-conventional naming, like in the case of reanalysis data.
+# 12/2/2013 v1.1.0 - updated script.  Instead of using [PM]CC-\d+ numbers for runs to backup, use the report 
+#                    number. This will allow for non-conventional naming, like in the case of reanalysis data.
 #
 # 10/24/2013 - D Sims
-##################################################################################################################
+#################################################################################################################
 use warnings;
 use strict;
 use autodie;
@@ -19,12 +19,12 @@ use Data::Dump;
 use Log::Log4perl qw{ get_logger };
 
 my $scriptname = basename($0);
-my $version = "v2.1.0_041615";
+my $version = "v2.2.0_060515";
 my $description = <<"EOT";
-Script to mirror report data to an external hard drive mounted at /media/MoCha_backup.  This script will determine
-the data size of the external hard drive, and if needed rotate out the oldest run (note: not determined by last
-modified time, but rather by oldest run) to make room for the new data.  Then rsync over a list of runs that will
-fit on the drive.
+Script to mirror report data to an external hard drive mounted at /media/MoCha_backup.  This script will 
+determine the data size of the external hard drive, and if needed rotate out the oldest run (note: not 
+determined by last modified time, but rather by oldest run) to make room for the new data.  Then rsync over 
+a list of runs that will fit on the drive.
 EOT
 
 my $usage = <<"EOT";
@@ -132,9 +132,9 @@ sub rotate_data {
     my $path = shift;
 
     opendir( my $backup, $$path ) || $logger->logdie( "Can't read the MoCha backup drive: $!");
-    my @sorted_expts = sort_data( [grep { ! /^(:?[.]+) | lost/x } readdir($backup)] ); 
+    my @sorted_expts = sort_data( [grep { ! /^\.+ | lost/x } readdir($backup)] ); 
+    
     my $expt_to_remove = shift @sorted_expts;
-
     $logger->info("Removing '$$path/$expt_to_remove' to make space for new data");
     rmtree( "$$path/$expt_to_remove" );
 }
@@ -177,6 +177,11 @@ sub get_runlist {
 sub sort_data {
     # Sort the experiment data by the report id string
     my $data = shift;
+
+    # Need to remove 'dbase_backup' from the sort routine so we don't have issues. Always want this anyway.
+    my ($index) = grep { $$data[$_] eq 'dbase_backup' } 0..$#{$data};
+    splice( @$data, $index, 1 ) if $index;
+
     my @sorted_data = 
         map { $_ ->[0] } 
         sort { $a->[1] <=> $b->[1] }
