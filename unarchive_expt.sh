@@ -18,6 +18,6 @@ for expt in ${expt_files[@]}; do
         echo "Expt directory already exists. Adding to current directory"
     fi
     echo -n "Unarchving tarball '$expt'... "
-    tar -xzf $expt -C $new_dir 2>&1
+    tar -xzf $expt -C $new_dir
     echo "Done"
 done
