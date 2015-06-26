@@ -34,13 +34,13 @@ use Email::Sender::Simple qw(sendmail);
 
 use constant DEBUG_OUTPUT => 0;
 #use constant LOG_OUT      => "$ENV{'HOME'}/datacollector_dev.log";
-#use constant LOG_OUT      => "/results/sandbox/dc-test/datacollector_dev.log";
+#use constant LOG_OUT      => "/results/analysis/output/Home/tmp/test.log";
 use constant LOG_OUT      => "/var/log/mocha/archive.log";
 
 #print colored( "\n******************************************************\n*******  DEVELOPMENT VERSION OF DATACOLLECTOR  *******\n******************************************************\n\n", "bold yellow on_black");
 
 my $scriptname = basename($0);
-my $version = "v4.1.1_050615";
+my $version = "v4.4.0_062315";
 my $description = <<"EOT";
 Program to grab data from an Ion Torrent Run and either archive it, or create a directory that can be imported 
 to another analysis computer for processing.  
@@ -113,10 +113,6 @@ print_version if $ver_info;
 
 my $username = $ENV{'USER'};
 
-my $var1 = 'testing';
-my $var2 = 'there_is_no_data_only_testing!';
-
-
 # Format the logfile output
 $Text::Wrap::columns = 123;
 my $space = ' ' x ( length( timestamp('timestamp') ) + 3 );
@@ -167,6 +163,25 @@ sub log_msg {
     return;
 }
 
+
+if ( DEBUG_OUTPUT ) {
+    no warnings;
+    print "\n==============  DEBUG  ===============\n";
+    print "Options input into script:\n";
+    print "\tExpt Dir   =>  $resultsDir\n";
+    print "\tUser       =>  $username\n";
+    print "\tMethod     =>"; 
+    ($archive) ? print "  archive\n" : print "  extract\n";
+    print "\tOutput     =>  $output\n";
+    print "\tQuiet      =>  $quiet\n";
+    print "\tOutdir:    =>  $outdir\n";
+    print "\tcase #:    =>  $case_num\n";
+    print "\tR&D Expt:  =>  $r_and_d\n";
+    print "\tOCP Run:   =>  $ocp_run\n";
+    print "\tExpt Type  =>  $expt_type\n";
+    print "======================================\n\n";
+}
+
 ##----------------------------------------- End Command Arg Parsing ------------------------------------##
 
 # Files sufficient for a new export and reanalysis
@@ -176,6 +191,7 @@ my @exportFileList = qw{
 	sigproc_results/bfmask.bin
 	sigproc_results/analysis.bfmask.stats
 	sigproc_results/bfmask.stats
+    sigproc_results/analysis_return_code.txt
 	sigproc_results/Bead_density_raw.png
 	sigproc_results/Bead_density_200.png
 	sigproc_results/Bead_density_70.png
@@ -201,6 +217,12 @@ my @archivelist = qw{
 my ( $run_name ) = $expt_dir =~ /([MP]C[C123]-\d+.*_\d+)\/?$/;;
 $output = "$run_name." . timestamp('date') if ( ! defined $output );
 
+# Stage the intial components of either an extraction or archive.
+chdir $expt_dir || die "Can not access the results directory '$expt_dir': $!";
+version_check();
+sample_key_gen();
+generate_return_code(\$expt_dir);
+
 if ($extract) {
     data_extract();
     exit;
@@ -217,29 +239,12 @@ elsif ($archive) {
 sub data_extract {
     # Run the export subroutine for pushing data to a different server
 
-    # Generate a sample key file for the package
-    sample_key_gen();
-
-    # Check to see what version of TSS we have an modify the paths accordingly.
-    version_check();
-
+    # Create a place for our new data.
     my $destination_dir = create_dest( $outdir_path, '/results/xfer/' );
     print "Creating a copy of data in '$destination_dir from '$expt_dir' for export...\n";
     system( "mkdir -p $destination_dir/$output/sigproc_results/" );
     my $sigproc_out = "$destination_dir/$output/sigproc_results/";
 
-    # Add 'analysis_return_code' file to be compatible with TSv3.4+
-    if ( ! -e "$expt_dir/sigproc_results/analysis_return_code.txt" ) {
-        print "No analysis_return_code.txt file found.  Creating one to be compatible with TSv3.4+\n";
-        my $arc_file = "$sigproc_out/analysis_return_code.txt";
-        open( my $arc_fh, ">", $arc_file ) 
-            || die "Can't created an analysis_return_code.txt file in '$sigproc_out': $!";
-        print $arc_fh "0";
-        close $arc_fh;
-    } else {
-        print "Found analysis_return_code.txt file. Adding to the export filelist\n";
-        push( @exportFileList, "sigproc_results/analysis_return_code.txt" );
-    }
 
     if ( DEBUG_OUTPUT ) {
         print "\n==============  DEBUG  ===============\n";
@@ -277,21 +282,13 @@ sub data_extract {
 sub data_archive {
     # Run full archive on data.
 
-    chdir( $expt_dir ) || die "Can not access the results directory '$expt_dir': $!";
     my $archive_name = "$output.tar.gz";
     log_msg(" $username has started archive on '$output'.\n");
     log_msg(" $info Running in R&D mode.\n") if $r_and_d;
 
-
-    # Check to see what version of TSS we have and modify the path of the data accordingly.
-    version_check();
-
-    # Generate a sample key file;
-    sample_key_gen();
-
     # Get listing of plugin results to compare; have to deal with random numbered dirs now
     opendir( my $plugin_dir, "plugin_out" ); 
-    my @plugin_results = sort( grep { !/^[.]+$/ } readdir( $plugin_dir) );
+    my @plugin_results = sort( grep { !/^\.+$/ } readdir( $plugin_dir) );
 
     my @wanted_plugins = qw( variantCaller_out 
                              varCollector_out 
@@ -361,7 +358,6 @@ sub data_archive {
 
 sub version_check {
     # Find out what TS version running in order to customize some downstream functions
-
     log_msg(" $info Checking TSS version for file path info...\n");
 
     open( my $ver_fh, "<", "version.txt" ) || die "$err can not open the version.txt file for reading: $!";
@@ -376,12 +372,6 @@ sub version_check {
         log_msg(colored(" TSv4.2+ run detected. Making file and path adjustments...\n", "bold cyan on_black"));
         log_msg( "\tModifying path for Bead_density_data...\n" );
         map { (/Bead/) ? ($_ = basename($_)) : $_ } @exportFileList;
-        # TODO Remove this. May not be the right way to do this.
-        # I don't think this is the correct assumption.  Sometimes it's just in the pgm_logs.zip file. 
-        # Try to handle that way.
-        #log_msg( "\tRemoving request for explog_final.txt from list...\n" );
-        #my ($index) = grep { $exportFileList[$_] eq 'explog_final.txt' } 0..$#exportFileList;
-        #splice( @exportFileList, $index, 1);
     } else {
         log_msg(" $info An older version ($ts_version) was detected. Using old paths\n");
     }
@@ -396,11 +386,7 @@ sub version_check {
         } else {
             log_msg(" $info Successfully retrieved the explog_final.txt file from the pgm_log.zip file\n");
         }
-    } else {
-        # Do we want to be able to continue without?  
-        ;
-    }
-
+    } 
     return;
 }
 
@@ -474,6 +460,22 @@ sub create_dest {
         }
     }
     return $destination_dir;
+}
+
+sub generate_return_code {
+    # Add 'analysis_return_code' file to be compatible with TSv3.4+
+    my $expt_dir = shift;
+
+    if ( ! -e "$$expt_dir/sigproc_results/analysis_return_code.txt" ) {
+        log_msg(" No analysis_return_code.txt file found.  Creating one to be compatible with TSv3.4+\n");
+        my $arc_file = "$$expt_dir/sigproc_results/analysis_return_code.txt";
+        open( my $arc_fh, ">", $arc_file ) || die "Can't created an analysis_return_code.txt file: $!";
+        print $arc_fh "0";
+        close $arc_fh;
+    } else {
+        log_msg(" Found analysis_return_code.txt file. Adding to the export file list\n");
+    }
+    return;
 }
 
 sub copy_data {
