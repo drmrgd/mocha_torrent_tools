@@ -12,10 +12,11 @@ use autodie;
 use Getopt::Long;
 use File::Basename;
 use Term::ANSIColor;
+use JSON::XS;
 use Data::Dump;
 
 my $scriptname = basename($0);
-my $version = "v1.1.0_060315";
+my $version = "v1.3.1_092415-dev";
 my $description = <<"EOT";
 Create the template necessary for a batch upload to the Torrent Browser run plan API.  For now the rest
 of the necessary data (plugins, params, etc) are missing.  But, you can cut and paste this into the CSV
@@ -76,6 +77,7 @@ if ( $outfile ) {
 my @expt_dirs= @ARGV;
 
 # Check to be sure we have a sampleKey.txt file for each one or else we can't proceed.
+=cut
 for my $dir ( @expt_dirs ) {
     opendir( my $dir_fh, $dir );
     #print "processing $dir\n";
@@ -91,7 +93,17 @@ for my $expt ( @expt_dirs ) {
     open( my $sk_fh, "<", "$expt/sampleKey.txt" ) || die "Can't open the sampleKey.txt file: $!";
     $data{$runname} = { map{ chomp; split( /\t/, $_) } <$sk_fh> };
 }
+=cut
 
+# Get sample info
+my %data;
+for my $expt ( @expt_dirs ) {
+    (my $runname = $expt) =~ s/(.*?)\.\d{8}?$/${prefix}_$1/;
+    my $params_file = "$expt/ion_params_00.json";
+    ( -e $params_file ) ? 
+        ($data{$runname} = get_sample_info(\$params_file)) : 
+        print colored("WARNING: No ion_params_00.json file found in '$expt'. Skipping...\n", 'bold yellow on_black');
+}
 #dd %data;
 #exit;
 
@@ -137,4 +149,31 @@ for my $run( sort keys %agg_data ) {
 sub pad_numbers {
     my $number = shift;
     return sprintf( "%03d", $$number );
+}
+
+# XXX
+sub get_sample_info {
+    my $json_file = shift;
+    my $parsed_json;
+    my %sample_data;
+
+    open (my $json_fh, "<", $$json_file);
+    # First read in the whole thing...
+    my $json_data = JSON::XS->new->decode(<$json_fh>);
+    # Then read in the barcode samples sub-JSON element.
+    my $sample_json = JSON::XS->new->decode($$json_data{'barcodeSamples'});
+
+    for my $sample ( keys %$sample_json ) {
+        #print "$sample  =>  "; 
+        my $barcodes = $$sample_json{$sample}->{'barcodes'};
+        for my $barcode (@$barcodes) {
+            my $type = $$sample_json{$sample}->{'barcodeSampleInfo'}{$barcode}{'nucleotideType'};
+            #print "$sample => $type  =>  $barcode\n";
+            $sample_data{$barcode} = "$sample;TYPE:$type";
+        }
+    }
+
+    #dd \%sample_data;
+    #exit;
+    return \%sample_data;
 }
