@@ -10,7 +10,7 @@ use File::Copy;
 use Data::Dump;
 
 my $scriptname = basename($0);
-my $version = "v0.2.1_042114";
+my $version = "v0.3.0_092415";
 my $description = <<"EOT";
 Using a sampleKey.txt file, rename files by associating them with the samples indicated in the sampleKey 
 file.  
@@ -70,9 +70,12 @@ my @input_files = @ARGV;
 open( my $sk_fh, "<", $samplekey ) || die "Can't open the sampleKey.txt file for reading: $!";
 
 # Crude check to be sure we have a valid sampleKey file; probably not the best way, but good enough
-if ( ! grep { /IonXpress_\d+\s+\w+$/ } <$sk_fh> ) {
+#if ( grep { ! /IonXpress_\d+\s+\w+$/ } <$sk_fh> ) {
+if ( my @bad = grep { ! /IonXpress_\d+\s+[-_.\w]+$/ } <$sk_fh> ) {
     print "ERROR: File '$samplekey' does not appear to be a sampleKey.txt file. Check the file and try again.\n\n";
-    print $usage;
+    print "Offending lines:\n";
+    print "\t$_" for @bad;
+    print "\n";
     exit 1;
 }
 seek $sk_fh, 0, 0;
