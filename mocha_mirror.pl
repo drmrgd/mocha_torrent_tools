@@ -21,7 +21,7 @@ use Log::Log4perl qw{ get_logger };
 use constant DEBUG => 1;
 
 my $scriptname = basename($0);
-my $version = "v2.4.0_052316";
+my $version = "v2.4.1_052316";
 my $description = <<"EOT";
 Script to mirror report data to an external hard drive mounted at /media/MoCha_backup.  This script will 
 determine the data size of the external hard drive, and if needed rotate out the oldest run (note: not 
@@ -119,10 +119,11 @@ while ( $data_size > 10000) {
     $data_size = check_size();
 } 
 $logger->info("Looks like there is sufficient space for more data");
-exit;
 
 # Create list of files to rsync over and run backup
 my ( $files_for_backup ) = get_runlist( \$backup_path, \$results_path );
+dd $files_for_backup;
+exit;
 
 for my $run ( @$files_for_backup ) {
     $logger->info("Backing up $run...");
@@ -183,8 +184,10 @@ sub get_runlist {
     opendir( my $mirrordir, $$bak_path ) || $logger->logdie("Can't read the MoCha_backup directory: $!");
     my @mirrorfiles = sort_data( [grep { ! /^\.+ | lost | dbase/x } readdir( $mirrordir )] );
     my ($last_run) = $mirrorfiles[-1] =~ /_(\d+)$/;
+    $last_run //= 0; # need if this is brand new server to NAS drive.
 
-
+    print "Last Run => $last_run\n" if DEBUG;
+    
     # Get list of files in /results 
     opendir( my $datadir, $$data_path ) || $logger->logdie("Can't read the /results directory: $!");
     my @data = grep { ! /^[.]+/ } readdir( $datadir );
@@ -205,6 +208,7 @@ sub get_runlist {
     for my $elem (@backup_list) {
         push( @final_run_list, grep { /_$elem$/ } @data );
     }
+    print "total runs to back up: " . scalar @final_run_list . "\n" if DEBUG;
     return( \@final_run_list );
 }
 
