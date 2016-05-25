@@ -21,7 +21,7 @@ use Log::Log4perl qw{ get_logger };
 use constant DEBUG => 1;
 
 my $scriptname = basename($0);
-my $version = "v2.5.1_052516";
+my $version = "v2.6.0_052516";
 my $description = <<"EOT";
 Script to mirror report data to an external hard drive mounted at /media/MoCha_backup.  This script will 
 determine the data size of the external hard drive, and if needed rotate out the oldest run (note: not 
@@ -83,8 +83,6 @@ $logger->info( "Starting data mirror to external hard drive..." );
 #########------------------------------ END ARG Parsing ---------------------------------#########
 my $results_path   = '/results/analysis/output/Home';
 my $db_backup_path = '/results/dbase_backup';
-#my $backup_path = "/media/MoCha_backup";
-#my $backup_root = "/media/mocha_clia_nas";
 
 $target =~ s/\/$//; #dump terminal slash if it's there for the regexp later.
 my $backup_path = "$target/$server";
@@ -106,26 +104,18 @@ $logger->info("Checking MoCha_backup disc size to make sure there's room for mor
 my $data_size = check_size($backup_path);
 
 # Set total allowed size to 10 TB to allow for overhead space
-#while ( $data_size > 10000) {
-# TODO: Fix
-while ( $data_size > 5000) {
+while ( $data_size > 10000) {
     $logger->info("Backup drive too full.  Clearing space for new runs");
-
     rotate_data( \$backup_path );
-    
-    # TODO: comment back in
-    #$data_size = check_size();
-    $data_size -= 1000;
+    $data_size = check_size();
 } 
 $logger->info("Looks like there is sufficient space for more data");
-exit;
 
 # Create list of files to rsync over and run backup
 my ( $files_for_backup ) = get_runlist( \$backup_path, \$results_path );
 
 for my $run ( @$files_for_backup ) {
     $logger->info("Backing up $run...");
-    #eval { qx( rsync -avz --exclude=core.alignStats* $results_path/$run $backup_path/ ) };
     eval { qx( rsync -av --exclude=core.alignStats* $results_path/$run $backup_path/ ) };
     ( $@ ) ? $logger->error( "$@" ) : $logger->info( "$run was successfully backed up" );
 }
@@ -134,11 +124,9 @@ for my $run ( @$files_for_backup ) {
 $logger->info("Syncing backup of database backup directory...");
 eval { qx(rsync -av $db_backup_path $backup_path) };
 ($@) ? $logger->error("$@") : $logger->info( "Database backup directory was successfully synced to backup directory" );
-
 $logger->info( "Data backup to external hard drive is complete\n\n" );
 
 sub check_size {
-    use Filesys::Df; # Perl filesys utility; size is different than native df, but can adjust
     my $dir = shift;
     my $size = qx(du -s --block-size=1G --exclude='lost+found' $dir);
     my @elems = split(/\s+/,$size);
@@ -164,8 +152,7 @@ sub rotate_data {
     my @sorted_expts = sort_data(\$backup); 
     my $expt_to_remove = shift @sorted_expts;
     $logger->info("Removing '$$path/$expt_to_remove' to make space for new data");
-    # TODO: Comment back in!
-    #rmtree( "$$path/$expt_to_remove" );
+    rmtree( "$$path/$expt_to_remove" );
 }
 
 sub get_runlist {
@@ -212,10 +199,6 @@ sub sort_data {
     # Only run directories will have trailing '_\d+' string. Rest is not worth backing up.
     my @filelist = grep { /_\d+$/ } readdir($$data);
     
-    # Need to remove 'dbase_backup' from the sort routine so we don't have issues. Always want this anyway.
-    #my ($index) = grep { $$data[$_] eq 'dbase_backup' } 0..$#{$data};
-    #splice( @$data, $index, 1 ) if $index;
-
     my @sorted_data = 
         map { $_ ->[0] } 
         sort { $a->[1] <=> $b->[1] }
