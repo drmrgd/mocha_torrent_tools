@@ -18,12 +18,12 @@ use File::Basename;
 use Data::Dump;
 use Log::Log4perl qw{ get_logger };
 
-use constant DEBUG => 1;
+use constant DEBUG_OUTPUT => 0;
 
 my $scriptname = basename($0);
-my $version = "v2.6.0_052516";
+my $version = "v3.0.0_052616";
 my $description = <<"EOT";
-Script to mirror report data to an external hard drive mounted at /media/MoCha_backup.  This script will 
+Script to mirror report data to an external hard drive mounted to a Ion Torrent Server.  This script will 
 determine the data size of the external hard drive, and if needed rotate out the oldest run (note: not 
 determined by last modified time, but rather by oldest run) to make room for the new data.  Then rsync over 
 a list of runs that will fit on the drive.
@@ -65,10 +65,13 @@ die "ERROR: You must input the server name to run this!\n" unless $server;
 $server = lc($server);
 
 # Set up logger
-my $logger_conf = q(
+my $logfile;
+(DEBUG_OUTPUT) ? ($logfile = "$ENV{'HOME'}/mirror_dev.log") : ($logfile = '/var/log/mocha/mirror.log');
+
+my $logger_conf = qq(
     log4perl.logger                                               = DEBUG, Logfile
     log4perl.appender.Logfile                                     = Log::Log4perl::Appender::File
-    log4perl.appender.Logfile.filename                            = /var/log/mocha/mirror.log 
+    log4perl.appender.Logfile.filename                            = $logfile
     log4perl.appender.Logfile.mode                                = append
     log4perl.appender.Logfile.layout                              = Log::Log4perl::Layout::PatternLayout
     log4perl.appender.Logfile.layout.message_chomp_before_newlist = 0
@@ -87,7 +90,7 @@ my $db_backup_path = '/results/dbase_backup';
 $target =~ s/\/$//; #dump terminal slash if it's there for the regexp later.
 my $backup_path = "$target/$server";
 
-if (DEBUG) {
+if (DEBUG_OUTPUT) {
     print '='x50 . ' DEBUG ' . '='x50 . "\n";
     print "\ttarget path: $target\n";
     print "\tserver name: $server\n";
@@ -131,7 +134,7 @@ sub check_size {
     my $size = qx(du -s --block-size=1G --exclude='lost+found' $dir);
     my @elems = split(/\s+/,$size);
     $logger->info( "The data size of MoCha_backup is: $elems[0]GB." );
-    print( "The data size of MoCha_backup is: $elems[0]GB.\n" ) if DEBUG;
+    print( "The data size of MoCha_backup is: $elems[0]GB.\n" ) if DEBUG_OUTPUT;
     return $elems[0];
 }
 
@@ -167,12 +170,12 @@ sub get_runlist {
     my ($last_run) = $mirrorfiles[-1] =~ /_(\d+)$/;
     $last_run //= 0; # need if this is brand new server to NAS drive.
 
-    print "Last Run => $last_run\n" if DEBUG;
+    print "Last Run => $last_run\n" if DEBUG_OUTPUT;
     
     # Get list of files in /results 
     opendir( my $datadir, $$data_path ) || $logger->logdie("Can't read the /results directory: $!");
-    my @data = grep { ! /^[.]+/ } readdir( $datadir );
-    my @run_ids = map { /_(\d+)$/ } sort_data( \@data );
+    my @data = sort_data(\$datadir);
+    my @run_ids = map { /_(\d+)$/ } @data;
     
     for my $run ( @run_ids ) {
         if ( grep { /_$run$/ } @mirrorfiles ) {
@@ -188,7 +191,7 @@ sub get_runlist {
     for my $elem (@backup_list) {
         push( @final_run_list, grep { /_$elem$/ } @data );
     }
-    print "total runs to back up: " . scalar @final_run_list . "\n" if DEBUG;
+    print "total runs to back up: " . scalar @final_run_list . "\n" if DEBUG_OUTPUT;
     return( \@final_run_list );
 }
 
