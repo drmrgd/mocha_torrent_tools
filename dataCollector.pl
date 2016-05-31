@@ -32,15 +32,18 @@ use File::Slurp;
 use Email::MIME;
 use Email::Sender::Simple qw(sendmail);
 
-use constant DEBUG_OUTPUT => 0;
-#use constant LOG_OUT      => "$ENV{'HOME'}/datacollector_dev.log";
-#use constant LOG_OUT      => "/results/analysis/output/Home/tmp/test.log";
-use constant LOG_OUT      => "/var/log/mocha/archive.log";
+use constant DEBUG_OUTPUT => 1;
+use constant LOG_OUT      => "$ENV{'HOME'}/datacollector_dev.log";
+#use constant LOG_OUT      => "/var/log/mocha/archive.log";
 
-#print colored( "\n******************************************************\n*******  DEVELOPMENT VERSION OF DATACOLLECTOR  *******\n******************************************************\n\n", "bold yellow on_black");
+my $string = ' 'x19 . "DEVELOPMENT VERSION OF DATACOLLECTOR" . ' 'x19;
+print colored( '*'x75, 'bold yellow on_black');
+print colored("\n$string\n", 'bold yellow on_black');
+print colored('*'x75, 'bold yellow on_black');
+print "\n\n";
 
 my $scriptname = basename($0);
-my $version = "v4.4.0_062315";
+my $version = "v4.5.2_053116-dev";
 my $description = <<"EOT";
 Program to grab data from an Ion Torrent Run and either archive it, or create a directory that can be imported 
 to another analysis computer for processing.  
@@ -67,6 +70,7 @@ USAGE: $scriptname [options] [-t] <'clinical', 'general'> [-a | -e] <results dir
     -o, --output     Custom output file name.  (DEFAULT: 'run_name.mmddyyy')
     -d, --dir        Custom output / destination  directory (DEFAULT: /results/xfer/ for extract and /media/Aperio for archive)
     -r, --randd      Server is R&D server; do not email notify group and be more flexible with missing data.
+    -s, --server     Server type.  Can be PGM or S5 (DEFAULT: PGM).
     -q, --quiet      Run quietly without sending messages to STDOUT
     -v, --version    Version Information
     -h, --help       Display the help information
@@ -83,6 +87,7 @@ my $case_num;
 my $r_and_d;
 my $ocp_run;
 my $expt_type;
+my $server_type = 'PGM';
 
 GetOptions( "help|h"      => \$help,
             "version|v"   => \$ver_info,
@@ -95,7 +100,8 @@ GetOptions( "help|h"      => \$help,
             "randd|r"     => \$r_and_d,
             "OCP|O"       => \$ocp_run,
             "type|t=s"    => \$expt_type,
-        ) or do { print "\n$usage\n"; exit 1; };
+            "server|s=s"  => \$server_type,
+        ) or die "\n$usage\n";
 
 sub help {
 	printf "%s - %s\n%s\n\n%s\n", $scriptname, $version, $description, $usage;
@@ -122,21 +128,21 @@ my $err =   colored("ERROR:", 'bold red on_black');
 
 # Make sure that there is an appropriate Results Dir sent to script
 my $resultsDir = shift @ARGV;
-
 if ( ! defined $resultsDir ) {
 	print "$err No results directory was entered.  Please select the results directory to process.\n\n";
-	print "$usage\n";
-	exit 1;
-} elsif ( ! -d $resultsDir ) {
-	print "$err The results directory '$resultsDir' can not be found.\n\n";
-	exit 1;
+    die "$usage\n";
+} 
+elsif ( ! -d $resultsDir ) {
+	die "$err The results directory '$resultsDir' can not be found.\n\n";
+}
+elsif ( $resultsDir =~ /.*_tn_\d+\/?$/ ) {
+    die "$err An S5 thumbnail directory is only a partial dataset that can not be backed up. Use a full report directory instead!\n";
 }
 
 # Check for experiment type to know how to deal with this later.  May combine / supercede $r_and_d.
-if ( $expt_type ne 'general' && $expt_type ne 'clinical' ) {
+if ( ! defined $expt_type || $expt_type ne 'general' && $expt_type ne 'clinical' ) {
     print "$err No experiment type defined.  Please choose 'clinical' or 'general'\n\n";
-    print "$usage\n";
-    exit 1;
+    die $usage;
 }
 
 # Get the absolute path of the target and starting dirs to make it easier.
@@ -163,28 +169,39 @@ sub log_msg {
     return;
 }
 
+# Verify that the server type is valid.
+my @valid_servers = qw( PGM S5 S5-XL S5XL );
+$server_type = uc($server_type);
+unless ( grep{$_ eq $server_type} @valid_servers ) {
+    print "$err '$server_type' is not a valid server type. Valid servers are:\n";
+    print "\t\"$_\"\n" for @valid_servers;
+    exit 1;
+}
 
 if ( DEBUG_OUTPUT ) {
     no warnings;
     print "\n==============  DEBUG  ===============\n";
     print "Options input into script:\n";
-    print "\tExpt Dir   =>  $resultsDir\n";
-    print "\tUser       =>  $username\n";
-    print "\tMethod     =>"; 
+    print "\tExpt Dir     =>  $resultsDir\n";
+    print "\tUser         =>  $username\n";
+    print "\tMethod       =>"; 
     ($archive) ? print "  archive\n" : print "  extract\n";
-    print "\tOutput     =>  $output\n";
-    print "\tQuiet      =>  $quiet\n";
-    print "\tOutdir:    =>  $outdir\n";
-    print "\tcase #:    =>  $case_num\n";
-    print "\tR&D Expt:  =>  $r_and_d\n";
-    print "\tOCP Run:   =>  $ocp_run\n";
-    print "\tExpt Type  =>  $expt_type\n";
+    print "\tOutput       =>  $output\n";
+    print "\tQuiet        =>  $quiet\n";
+    print "\tOutdir:      =>  $outdir\n";
+    print "\tcase #:      =>  $case_num\n";
+    print "\tR&D Expt:    =>  $r_and_d\n";
+    print "\tOCP Run:     =>  $ocp_run\n";
+    print "\tExpt Type    =>  $expt_type\n";
+    print "\tServer Type  =>  $server_type\n";
     print "======================================\n\n";
 }
+exit;
 
 ##----------------------------------------- End Command Arg Parsing ------------------------------------##
 
 # Files sufficient for a new export and reanalysis
+# TODO: maybe need to move this to a subroutine where we cna alter the list based on the server type?
 my @exportFileList = qw{
 	sigproc_results/1.wells
 	sigproc_results/analysis.bfmask.bin
@@ -214,6 +231,7 @@ my @archivelist = qw{
 };
 
 # Setup custom and default output names
+# TODO: going to neeed a new regex here for the S5 server.
 my ( $run_name ) = $expt_dir =~ /([MP]C[C123]-\d+.*_\d+)\/?$/;;
 $output = "$run_name." . timestamp('date') if ( ! defined $output );
 
@@ -237,6 +255,8 @@ elsif ($archive) {
 }
 
 sub data_extract {
+    # TODO: Going to need to totally rework this for an S5 run.  Then again, this may not be possible.  For now, 
+    #       just halt on attempts with an S5 run?
     # Run the export subroutine for pushing data to a different server
 
     # Create a place for our new data.
@@ -358,6 +378,7 @@ sub data_archive {
 
 sub version_check {
     # Find out what TS version running in order to customize some downstream functions
+    # TODO: Update for TSS v5.0 and for S5 
     log_msg(" $info Checking TSS version for file path info...\n");
 
     open( my $ver_fh, "<", "version.txt" ) || die "$err can not open the version.txt file for reading: $!";
@@ -392,6 +413,7 @@ sub version_check {
 
 sub sample_key_gen {
     # Generate a sampleKey.txt file for the package
+    # TODO: Double check that sampleKeyGen works on S5 servers.
     log_msg(" Generating a sampleKey.txt file for the export package...\n" );
     eval { system( "cd $expt_dir && sampleKeyGen -o sampleKey.txt" ) };
     if ($@) {
@@ -402,7 +424,8 @@ sub sample_key_gen {
 }
 
 sub get_bams {
-    # Generate a zipfile of BAMs generated for each samle for the archive
+    # Generate a zipfile of BAMs generated for each sample for the archive
+    # TODO: Double check that this can be done on S5 Server.
     my $zipfile = basename($expt_dir) . "_library_bams.zip";
 
     open( my $sample_key, "<", "sampleKey.txt" );
@@ -489,6 +512,7 @@ sub archive_data {
 	my $archivename = shift;
     
 	my $cwd = getcwd; 
+    # TODO: Fix this!  Aperio no longer exists and is not a good default.
     my $destination_dir = create_dest( $outdir_path, '/media/Aperio/' ); 
 
     # Check the fileshare before we start
@@ -503,6 +527,7 @@ sub archive_data {
     }
     
 	# Create a checksum file for all of the files in the archive and add it to the tarball 
+    # TODO: Can i optimize this at all?  
 	log_msg(" Creating an md5sum list for all archive files.\n");
 
 	if ( -e 'md5sum.txt' ) {
@@ -740,6 +765,7 @@ sub send_mail {
     my @additional_recipients;
 
     $$case //= "---"; 
+    # TODO: Need to fix this regex for new S5 servers.
     my ($pgm_name) = $run_name =~ /([PM]C[123C]-\d+)/;
     $pgm_name //= 'Unknown';
     (my $time = timestamp('timestamp')) =~ s/[\[\]]//g;
