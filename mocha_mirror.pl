@@ -21,7 +21,7 @@ use Log::Log4perl qw{ get_logger };
 use constant DEBUG_OUTPUT => 0;
 
 my $scriptname = basename($0);
-my $version = "v3.0.0_052616";
+my $version = "v3.2.0_053116";
 my $description = <<"EOT";
 Script to mirror report data to an external hard drive mounted to a Ion Torrent Server.  This script will 
 determine the data size of the external hard drive, and if needed rotate out the oldest run (note: not 
@@ -30,22 +30,31 @@ a list of runs that will fit on the drive.
 EOT
 
 my $usage = <<"EOT";
-USAGE: $0 [options] 
-    -t, --target    Target backup drive (DEFAULT: '/media/mocha_clia_nas')
-    -s, --server    Server name.
-    -v, --version   Version information
-    -h, --help      Print this help information
+USAGE: $scriptname [options] 
+    -r, --rsync_opts    Comma separated list of options to pass to rsync. Use only short names without using 
+                        the hyphens (e.g. 'P', not '-P' or '--progress'). If you must use a long name, preceed
+                        it with a single hyphen (e.g. '-window-size=1' would result in '--window-size=1', a 
+                        valid rsync option often needed with rsync). (DEFAULT: '-a -z').
+
+    -t, --target        Target backup drive (DEFAULT: '/media/mocha_clia_nas').
+
+    -s, --server        Server name, which should match the destination directory (e.g. 'mcc-clia').
+
+    -v, --version       Version information.
+    -h, --help          Print this help information.
 EOT
 
 my $help;
 my $ver_info;
 my $target = '/media/mocha_clia_nas';
 my $server;
+my $rsync_opts;
 
-GetOptions( "target|t=s"  => \$target,
-            "server|s=s"  => \$server,
-            "version"     => \$ver_info,
-            "help"        => \$help )
+GetOptions( "rsync_opts|r=s"  => \$rsync_opts,
+            "target|t=s"      => \$target,
+            "server|s=s"      => \$server,
+            "version"         => \$ver_info,
+            "help"            => \$help )
         or print $usage;
 
 sub help {
@@ -63,6 +72,12 @@ version if $ver_info;
 
 die "ERROR: You must input the server name to run this!\n" unless $server;
 $server = lc($server);
+
+# Configure the rsync opts to be used.
+my $opts;
+my @rsync_opts = map{"-$_"} split(/,/,$rsync_opts) if $rsync_opts;
+(@rsync_opts) ? ($opts = join(' ', @rsync_opts)) : ($opts = '-az');
+print "Options to be used for rsync: $opts\n" if DEBUG_OUTPUT;
 
 # Set up logger
 my $logfile;
@@ -119,7 +134,8 @@ my ( $files_for_backup ) = get_runlist( \$backup_path, \$results_path );
 
 for my $run ( @$files_for_backup ) {
     $logger->info("Backing up $run...");
-    eval { qx( rsync -av --exclude=core.alignStats* $results_path/$run $backup_path/ ) };
+    #eval { qx( rsync -av --exclude=core.alignStats* $results_path/$run $backup_path/ ) };
+    eval { qx( rsync $opts --exclude=core.alignStats* $results_path/$run $backup_path/ ) };
     ( $@ ) ? $logger->error( "$@" ) : $logger->info( "$run was successfully backed up" );
 }
 
