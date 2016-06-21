@@ -44,7 +44,7 @@ print colored('*'x75, 'bold yellow on_black');
 print "\n\n";
 
 my $scriptname = basename($0);
-my $version = "v4.6.6_062116-dev";
+my $version = "v4.6.7_062116-dev";
 my $description = <<"EOT";
 Program to grab data from an Ion Torrent Run and either archive it, or create a directory that can be imported 
 to another analysis computer for processing.  
@@ -118,7 +118,6 @@ sub print_version {
 help if $help;
 print_version if $ver_info;
 
-my $username = $ENV{'USER'};
 
 # Format the logfile output
 $Text::Wrap::columns = 123;
@@ -188,7 +187,7 @@ if ( DEBUG_OUTPUT ) {
     print "\n==============  DEBUG  ===============\n";
     print "Options input into script:\n";
     print "\tExpt Dir     =>  $resultsDir\n";
-    print "\tUser         =>  $username\n";
+    print "\tUser         =>  $ENV{'USER'}\n";
     print "\tMethod       =>"; 
     ($archive) ? print "  archive\n" : print "  extract\n";
     print "\tOutput       =>  $output\n";
@@ -208,11 +207,6 @@ if ( DEBUG_OUTPUT ) {
 # Stage the intial components of either an extraction or archive.
 chdir $expt_dir || die "Can not access the results directory '$expt_dir': $!";
 print "$info Current working directory is: " . getcwd() . "\n" if DEBUG_OUTPUT;
-
-# Generate a file manifest depending on the task and servertype
-# TODO:
-my $file_manifest = gen_filelist(\$server_type);
-dd $file_manifest;
 
 # Generate a sampleKey.txt file
 # In this version (v5.0+) we need to use a different file for the sampleKeyGen script, but need to keep old
@@ -241,16 +235,35 @@ if ( ! -e "$expt_dir/explog_final.txt" ) {
     }
 } 
 
+# Generate a file manifest depending on the task and servertype
+my $file_manifest = gen_filelist(\$server_type, \$ts_version);
+
+# NOTE: Remove this after some testing.  We no longer need to deal with this patch I think.
 generate_return_code(\$expt_dir);
-exit;
+
+if ($extract) {
+    # TODO: do this a little differently.  First generate a master list of data, then fork into either the archive or 
+    #       the extraction sub routines.  This needs a bit of cleaning up!
+    print "$info The data extract function is not available in this version.\n";
+    exit 1;
+    data_extract();
+}
+elsif ($archive) {
+    # TODO:
+    data_archive($file_manifest);
+} else {
+	print "$err You must choose archive (-a) or extract (-e) options when running this script\n\n";
+	print "$usage\n";
+	exit 1;
+}
 
 sub gen_filelist {
     # output a file manifest depending on the type of server (PGM or S5) and the software version.
-    # 
     # For S5 exportation, need the whole sigproc_results directory with the 96 blocks (~135GB), and have to put that into an
     # 'onboard_results' directory for processing.  Then add in the normal directoories and files in the root directory.
     
-    my $platform = shift;
+    my ($platform,$version) = @_;
+    
     # Get from any platform
     my @common_list = qw(
         drmaa_stdout.txt
@@ -258,12 +271,12 @@ sub gen_filelist {
         explog.txt
         pgm_logs.zip
         ionparams_00.json 
-        plugin_out/*
         report.pdf
         version.txt
         sysinfo.txt
         InitLog.txt
         sampleKey.txt
+        sigproc_results/*
         );
 
     # Only available on S5
@@ -293,88 +306,78 @@ sub gen_filelist {
         sigproc_results/avgNukeTrace_TCAG.txt
     };
 
-    ($$platform eq 'S5') ? (return [@common_list, @s5_file_list]) : (return  [@common_list, @pgm_file_list]);
+    # Get listing of plugin results to compare; have to deal with random numbered dirs now
+    #my @wanted_plugins = qw( variantCaller_out 
+                             #varCollector_out 
+                             #AmpliconCoverageAnalysis_out 
+                             #coverageAnalysis_out
+                           #);
+
+    opendir( my $plugin_dir, "plugin_out" ); 
+    my @plugin_results = map {'plugin_out/' . $_ } sort( grep { !/^\.+$/ } readdir( $plugin_dir) );
+    my @file_manifest = (@common_list, @plugin_results);
+    ($$platform eq 'S5') ? push(@file_manifest, @s5_file_list) : push(@file_manifest, @pgm_file_list);
+    #dd \@file_manifest;
+
+    my $package_intact = check_data_package(\@file_manifest, $ts_version, $platform);
+    ($package_intact) ?  log_msg(" All data located.  Proceeding with archive creation\n") : halt(\$expt_dir, 1);
+    exit;
+    #for my $plugin_data (@plugin_results) {
+        #push( @$archivelist, "plugin_out/$plugin_data" ) if grep { $plugin_data =~ /$_/ } @wanted_plugins;
+    #}
+
+    #($$platform eq 'S5') ? (return [@common_list, @s5_file_list]) : (return [@common_list, @pgm_file_list]);
+    return \@file_manifest;
 }
 
-if ($extract) {
-    # TODO: do this a little differently.  First generate a master list of data, then fork into either the archive or 
-    #       the extraction sub routines.  This needs a bit of cleaning up!
-    print "$info The data extract function is not available in this version.\n";
-    exit 1;
-    data_extract();
-    exit;
-}
-elsif ($archive) {
-    data_archive();
-    exit;
-} else {
-	print "$err You must choose archive (-a) or extract (-e) options when running this script\n\n";
-	print "$usage\n";
-	exit 1;
+sub check_data_package() {
+    my ($archivelist, $version, $platform) = @_;
+
+    log_msg(" $info Checking for mandatory, run specific data...");
+
+    # Check to be sure that all of the results logs are there or exit so we don't miss anything
+    if ( ! grep { /variantCaller_out/ } @$archivelist ) {
+        if ( $r_and_d || $ocp_run ) {
+            log_msg(" $warn No TVC results directory. Skipping...\n");
+        } else {
+            log_msg(" $err TVC results directory is missing. Did you run TVC?\n");
+            return 0;
+        }
+    }
+    if ( ! grep { /varCollector/ } @$archivelist ) {
+        if ( $r_and_d || $ocp_run ) {
+            log_msg(" $warn No varCollector plugin data. Skipping...\n");
+        } else {
+            log_msg(" $err No varCollector plugin data. Was varCollector run?\n");
+            return 0;
+        }
+    }
+    if ( ! grep { /AmpliconCoverageAnalysis_out/ } @$archivelist ) {
+        if ( $r_and_d || $ocp_run ) {
+            log_msg(" $warn No AmpliconCoverageAnalysisData. Skipping...\n");
+        } 
+    }
+    if ( ! grep { /coverageAnalysis_out/ } @$archivelist ) {
+        if ( $ocp_run && ! $r_and_d ) {
+            log_msg(" $err CoverageAnalysis data is missing.\n");
+            return 0;
+        } else {
+            log_msg(" $warn No CoverageAnalysis. Skipping...\n");
+        }
+    }
+    return 1;
 }
 
 sub data_archive {
     # Run full archive on data.
     # TODO: going to pull the data manifest in as an array.
     my $archivelist = shift;
-    dd $archivelist;
-    exit;
-
     my $archive_name = "$output.tar.gz";
-    log_msg(" $username has started archive on '$output'.\n");
+
+    log_msg(" $info $ENV{'USER'} has started archive on '$output'.\n");
     log_msg(" $info Running in R&D mode.\n") if $r_and_d;
 
-    # Get listing of plugin results to compare; have to deal with random numbered dirs now
-    opendir( my $plugin_dir, "plugin_out" ); 
-    my @plugin_results = sort( grep { !/^\.+$/ } readdir( $plugin_dir) );
 
-    my @wanted_plugins = qw( variantCaller_out 
-                             varCollector_out 
-                             AmpliconCoverageAnalysis_out 
-                             coverageAnalysis_out
-                           );
-
-    for my $plugin_data (@plugin_results) {
-        #push( @archivelist, "plugin_out/$plugin_data" ) if grep { $plugin_data =~ /$_/ } @wanted_plugins;
-        push( @$archivelist, "plugin_out/$plugin_data" ) if grep { $plugin_data =~ /$_/ } @wanted_plugins;
-    }
-    #push( @$archivelist, $_ ) for @exportFileList;
-
-    # Check to be sure that all of the results logs are there or exit so we don't miss anything
-    #if ( ! grep { /variantCaller_out/ } @archivelist ) {
-    if ( ! grep { /variantCaller_out/ } @$archivelist ) {
-        if ( $r_and_d || $ocp_run ) {
-            log_msg(" $warn No TVC results directory. Skipping...\n");
-        } else {
-            log_msg(" $err TVC results directory is missing. Did you run TVC?\n");
-            halt(\$expt_dir, 1);
-        }
-    }
-    #if ( ! grep { /varCollector/ } @archivelist ) {
-    if ( ! grep { /varCollector/ } @$archivelist ) {
-        if ( $r_and_d || $ocp_run ) {
-            log_msg(" $warn No varCollector plugin data. Skipping...\n");
-        } else {
-            log_msg(" $err No varCollector plugin data. Was varCollector run?\n");
-            halt(\$expt_dir, 1);
-        }
-    }
-    #if ( ! grep { /AmpliconCoverageAnalysis_out/ } @archivelist ) {
-    if ( ! grep { /AmpliconCoverageAnalysis_out/ } @$archivelist ) {
-        if ( $r_and_d || $ocp_run ) {
-            log_msg(" $warn No AmpliconCoverageAnalysisData. Skipping...\n");
-        } 
-    }
-    #if ( ! grep { /coverageAnalysis_out/ } @archivelist ) {
-    if ( ! grep { /coverageAnalysis_out/ } @$archivelist ) {
-        if ( $ocp_run && ! $r_and_d ) {
-            log_msg(" $err CoverageAnalysis data is missing.\n");
-            halt(\$expt_dir, 1);
-        } else {
-            log_msg(" $warn No CoverageAnalysis. Skipping...\n");
-        }
-    }
-    log_msg(" All data located.  Proceeding with archive creation\n");
 
     # Collect BAM files for the archive
     my $bamzip = get_bams();
