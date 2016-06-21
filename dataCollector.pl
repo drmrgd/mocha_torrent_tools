@@ -43,7 +43,7 @@ print colored('*'x75, 'bold yellow on_black');
 print "\n\n";
 
 my $scriptname = basename($0);
-my $version = "v4.5.1_060116-dev";
+my $version = "v4.6.2_062116-dev";
 my $description = <<"EOT";
 Program to grab data from an Ion Torrent Run and either archive it, or create a directory that can be imported 
 to another analysis computer for processing.  
@@ -209,8 +209,10 @@ if ( DEBUG_OUTPUT ) {
 
 # Stage the intial components of either an extraction or archive.
 chdir $expt_dir || die "Can not access the results directory '$expt_dir': $!";
-my @file_manifest = gen_filelist();
-dd \@file_manifest;
+my $file_manifest = gen_filelist(\$server_type);
+# TODO:
+print ref $file_manifest , ' => ';
+dd $file_manifest;
 exit;
 #version_check();
 # XXX
@@ -220,22 +222,37 @@ generate_return_code(\$expt_dir);
 
 sub gen_filelist {
     # output a file manifest depending on the type of server (PGM or S5) and the software version.
-
-    my @s5_list = qw(
-        basecaller_results/BaseCaller.json
+    # 
+    # For S5 exportation, need the whole sigproc_results directory with the 96 blocks (~135GB), and have to put that into an
+    # 'onboard_results' directory for processing.  Then add in the normal directoories and files in the root directory.
+    
+    my $platform = shift;
+    # Get from any platform
+    my @common_list = qw(
         drmaa_stdout.txt
         explog_final.txt
-        expMeta.dat
-        InitLog.txt
-        ionparams_00.json
+        explog.txt
         pgm_logs.zip
+        ionparams_00.json 
         plugin_out/*
         report.pdf
-        searilzed*json
         version.txt
+        sysinfo.txt
+        InitLog.txt
+        sampleKey.txt
         );
 
-    my @exportFileList = qw{
+    # Only available on S5
+    my @s5_file_list = qw(
+        basecaller_results/BaseCaller.json
+        expMeta.dat
+        serialzed*json
+        );
+
+    # Only available on PGM
+    my @pgm_file_list = qw{
+        basecaller_results/datasets_basecaller.json
+        basecaller_results/datasets_pipeline.json
         sigproc_results/1.wells
         sigproc_results/analysis.bfmask.bin
         sigproc_results/bfmask.bin
@@ -250,20 +267,9 @@ sub gen_filelist {
         sigproc_results/Bead_density_contour.png
         sigproc_results/avgNukeTrace_ATCG.txt
         sigproc_results/avgNukeTrace_TCAG.txt
-        explog.txt
-        explog_final.txt
-        version.txt
-        sampleKey.txt
     };
 
-    my @archivelist = qw{ 
-        ion_params_00.json
-        basecaller_results/datasets_basecaller.json
-        basecaller_results/datasets_pipeline.json
-        sysinfo.txt
-    };
-
-    return;
+    ($$platform eq 'S5') ? (return [@common_list, @s5_file_list]) : (return  [@common_list, @pgm_file_list]);
 }
 
 if ($extract) {
