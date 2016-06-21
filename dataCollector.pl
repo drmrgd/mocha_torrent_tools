@@ -33,7 +33,8 @@ use Email::MIME;
 use Email::Sender::Simple qw(sendmail);
 
 use constant DEBUG_OUTPUT => 1;
-use constant LOG_OUT      => "$ENV{'HOME'}/datacollector_dev.log";
+use constant LOG_OUT      => \*STDOUT;
+#use constant LOG_OUT      => "$ENV{'HOME'}/datacollector_dev.log";
 #use constant LOG_OUT      => "/var/log/mocha/archive.log";
 
 my $string = ' 'x19 . "DEVELOPMENT VERSION OF DATACOLLECTOR" . ' 'x19;
@@ -43,7 +44,7 @@ print colored('*'x75, 'bold yellow on_black');
 print "\n\n";
 
 my $scriptname = basename($0);
-my $version = "v4.6.2_062116-dev";
+my $version = "v4.6.3_062116-dev";
 my $description = <<"EOT";
 Program to grab data from an Ion Torrent Run and either archive it, or create a directory that can be imported 
 to another analysis computer for processing.  
@@ -209,14 +210,15 @@ if ( DEBUG_OUTPUT ) {
 
 # Stage the intial components of either an extraction or archive.
 chdir $expt_dir || die "Can not access the results directory '$expt_dir': $!";
+print "$info Current working directory is: " . getcwd() . "\n" if DEBUG_OUTPUT;
 my $file_manifest = gen_filelist(\$server_type);
 # TODO:
 print ref $file_manifest , ' => ';
 dd $file_manifest;
-exit;
-#version_check();
+version_check();
 # XXX
-#exit;
+exit;
+
 sample_key_gen();
 generate_return_code(\$expt_dir);
 
@@ -427,24 +429,26 @@ sub version_check {
     # Find out what TS version running in order to customize some downstream functions
     # TODO: Update for TSS v5.0 and for S5 
     log_msg(" $info Checking TSS version for file path info...\n");
-
+    
     open( my $ver_fh, "<", "version.txt" ) || die "$err can not open the version.txt file for reading: $!";
     (my $ts_version) = map { /Torrent_Suite=(.*)/ } <$ver_fh>;
-    print "DEBUG: TSS version is '$ts_version'\n" if DEBUG_OUTPUT;
+    #print "DEBUG: TSS version is '$ts_version'\n" if DEBUG_OUTPUT;
+    log_msg("\tTSS version is '$ts_version'\n");
     close $ver_fh;
 
-    # Looks like location of Bead_density files has moved in 4.2.1.
+    # Used before for moving the Bead density paths.  Not needed anymore, but keep this skeleton code for any
+    # future use for which it might be helpful.
     my $old_version = version->parse('4.2.1');
     my $curr_version = version->parse($ts_version);
 
-    if ($ts_version >= $old_version ) { 
-        log_msg(colored(" TSv4.2+ run detected. Making file and path adjustments...\n", "bold cyan on_black"));
-        log_msg( "\tModifying path for Bead_density_data...\n" );
-        # TODO:
+    # NOTE: Not needed anymore.
+    #if ($ts_version >= $old_version ) { 
+        #log_msg(colored(" TSv4.2+ run detected. Making file and path adjustments...\n", "bold cyan on_black"));
+        #log_msg( "\tModifying path for Bead_density_data...\n" );
         #map { (/Bead/) ? ($_ = basename($_)) : $_ } @exportFileList;
-    } else {
-        log_msg(" $info An older version ($ts_version) was detected. Using old paths\n");
-    }
+    #} else {
+        #log_msg(" $info An older version ($ts_version) was detected. Using old paths\n");
+    #}
 
     # Check to see if there is a 'explog_final.txt' file in cwd or else try to get one from the 
     # pgm_logs.zip
