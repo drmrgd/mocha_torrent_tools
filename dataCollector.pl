@@ -44,7 +44,7 @@ print colored('*'x75, 'bold yellow on_black');
 print "\n\n";
 
 my $scriptname = basename($0);
-my $version = "v4.6.7_062116-dev";
+my $version = "v4.6.8_062116-dev";
 my $description = <<"EOT";
 Program to grab data from an Ion Torrent Run and either archive it, or create a directory that can be imported 
 to another analysis computer for processing.  
@@ -182,14 +182,18 @@ unless ( grep{$_ eq $server_type} @valid_servers ) {
 my ( $run_name ) = $expt_dir =~ /((?:S5-)[MP]C[C12345]-\d+.*_\d+)\/?$/;;
 $output = "$run_name." . timestamp('date') if ( ! defined $output );
 
+my $method; 
+($archive) ? ($method = 'archive') : ($method = 'extract');
+log_msg(" $info $ENV{'USER'} has started an $method on '$output'.\n");
+log_msg(" $info Running in R&D mode.\n") if $r_and_d;
+
 if ( DEBUG_OUTPUT ) {
     no warnings;
     print "\n==============  DEBUG  ===============\n";
     print "Options input into script:\n";
     print "\tExpt Dir     =>  $resultsDir\n";
     print "\tUser         =>  $ENV{'USER'}\n";
-    print "\tMethod       =>"; 
-    ($archive) ? print "  archive\n" : print "  extract\n";
+    print "\tMethod       =>  $method\n"; 
     print "\tOutput       =>  $output\n";
     print "\tQuiet        =>  $quiet\n";
     print "\tOutdir:      =>  $outdir\n";
@@ -223,8 +227,7 @@ if ($ts_version >= $old_version ) {
     sample_key_gen('old');
 }
 
-# Check to see if there is a 'explog_final.txt' file in cwd or else try to get one from the 
-# pgm_logs.zip
+# Check to see if there is a 'explog_final.txt' file in cwd or try to get one from the pgm_logs.zip
 if ( ! -e "$expt_dir/explog_final.txt" ) {
     log_msg(" $warn No explog_final.txt in $expt_dir. Attempting to get from pgm_logs.zip...\n");
     if ( ! qx( unzip -j pgm_logs.zip explog_final.txt ) ) {
@@ -235,11 +238,11 @@ if ( ! -e "$expt_dir/explog_final.txt" ) {
     }
 } 
 
-# Generate a file manifest depending on the task and servertype
-my $file_manifest = gen_filelist(\$server_type, \$ts_version);
-
 # NOTE: Remove this after some testing.  We no longer need to deal with this patch I think.
 generate_return_code(\$expt_dir);
+
+# Generate a file manifest depending on the task and servertype
+my $file_manifest = gen_filelist(\$server_type, \$ts_version);
 
 if ($extract) {
     # TODO: do this a little differently.  First generate a master list of data, then fork into either the archive or 
@@ -306,27 +309,26 @@ sub gen_filelist {
         sigproc_results/avgNukeTrace_TCAG.txt
     };
 
+    # NOTE: Instead of just adding specific plugins, why not take them all and then later just make sure we have the
+    # bare minimum ones we want.
     # Get listing of plugin results to compare; have to deal with random numbered dirs now
     #my @wanted_plugins = qw( variantCaller_out 
                              #varCollector_out 
                              #AmpliconCoverageAnalysis_out 
                              #coverageAnalysis_out
                            #);
+    #for my $plugin_data (@plugin_results) {
+        #push( @$archivelist, "plugin_out/$plugin_data" ) if grep { $plugin_data =~ /$_/ } @wanted_plugins;
+    #}
 
     opendir( my $plugin_dir, "plugin_out" ); 
     my @plugin_results = map {'plugin_out/' . $_ } sort( grep { !/^\.+$/ } readdir( $plugin_dir) );
     my @file_manifest = (@common_list, @plugin_results);
     ($$platform eq 'S5') ? push(@file_manifest, @s5_file_list) : push(@file_manifest, @pgm_file_list);
-    #dd \@file_manifest;
 
     my $package_intact = check_data_package(\@file_manifest, $ts_version, $platform);
     ($package_intact) ?  log_msg(" All data located.  Proceeding with archive creation\n") : halt(\$expt_dir, 1);
-    exit;
-    #for my $plugin_data (@plugin_results) {
-        #push( @$archivelist, "plugin_out/$plugin_data" ) if grep { $plugin_data =~ /$_/ } @wanted_plugins;
-    #}
 
-    #($$platform eq 'S5') ? (return [@common_list, @s5_file_list]) : (return [@common_list, @pgm_file_list]);
     return \@file_manifest;
 }
 
@@ -374,15 +376,11 @@ sub data_archive {
     my $archivelist = shift;
     my $archive_name = "$output.tar.gz";
 
-    log_msg(" $info $ENV{'USER'} has started archive on '$output'.\n");
-    log_msg(" $info Running in R&D mode.\n") if $r_and_d;
-
-
-
     # Collect BAM files for the archive
     my $bamzip = get_bams();
-    #push(@archivelist, $bamzip);
     push(@$archivelist, $bamzip);
+    dd $archivelist;
+    exit;
 
     if ( DEBUG_OUTPUT ) {
         print "\n==============  DEBUG  ===============\n";
@@ -484,7 +482,7 @@ sub get_bams {
     close $sample_key;
 
     my $cwd = abs_path();
-    opendir( my $dir, $cwd);
+    opendir(my $dir, $cwd);
     my @bam_files = grep { /IonXpress.*\.bam(?:\.bai)?$/ } readdir($dir);
 
     my @wanted_bams;
@@ -492,6 +490,15 @@ sub get_bams {
         my ($barcode) = $bam =~ /(IonXpress_\d+)/;
         push( @wanted_bams, $bam ) if exists $samples{$barcode};
     }
+
+    # Check to see if we need to generate a new zip archive or if we already have what we need.
+    # TODO: <<STOPPING POINT>>
+    # Determine if we really need a zip file of these BAMS or if we can get away with just a directory of them.  We can't 
+    # compress them much futher than they are, so why not speed this up with a non-cpression method instead.  Also, no need 
+    # to keep the BAI files.
+    my @zip_list = system("unzip -l $zipfile");
+    dd \@zip_list;
+    exit;
 
     # Generate a zip archive of the desired BAM files.
     log_msg(" Generating a ZIP archive of BAM files for the package...\n");
