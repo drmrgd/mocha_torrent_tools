@@ -43,7 +43,7 @@ print colored('*'x75, 'bold yellow on_black');
 print "\n\n";
 
 my $scriptname = basename($0);
-my $version = "v4.5.1_053116-dev";
+my $version = "v4.5.1_060116-dev";
 my $description = <<"EOT";
 Program to grab data from an Ion Torrent Run and either archive it, or create a directory that can be imported 
 to another analysis computer for processing.  
@@ -220,6 +220,20 @@ generate_return_code(\$expt_dir);
 
 sub gen_filelist {
     # output a file manifest depending on the type of server (PGM or S5) and the software version.
+
+    my @s5_list = qw(
+        basecaller_results/BaseCaller.json
+        drmaa_stdout.txt
+        explog_final.txt
+        expMeta.dat
+        InitLog.txt
+        ionparams_00.json
+        pgm_logs.zip
+        plugin_out/*
+        report.pdf
+        searilzed*json
+        version.txt
+        );
 
     my @exportFileList = qw{
         sigproc_results/1.wells
