@@ -44,7 +44,7 @@ print colored('*'x75, 'bold yellow on_black');
 print "\n\n";
 
 my $scriptname = basename($0);
-my $version = "v4.6.5_062116-dev";
+my $version = "v4.6.6_062116-dev";
 my $description = <<"EOT";
 Program to grab data from an Ion Torrent Run and either archive it, or create a directory that can be imported 
 to another analysis computer for processing.  
@@ -240,7 +240,9 @@ if ( ! -e "$expt_dir/explog_final.txt" ) {
         log_msg(" $info Successfully retrieved the explog_final.txt file from the pgm_log.zip file\n");
     }
 } 
+
 generate_return_code(\$expt_dir);
+exit;
 
 sub gen_filelist {
     # output a file manifest depending on the type of server (PGM or S5) and the software version.
@@ -534,6 +536,9 @@ sub create_dest {
 sub generate_return_code {
     # Add 'analysis_return_code' file to be compatible with TSv3.4+
     my $expt_dir = shift;
+    log_msg(" Checking for analysis_return_code.txt file...\n");
+    log_msg("\tNo longer needed for runs newer than v3.4+.  To be removed!\n");
+    return;
 
     if ( ! -e "$$expt_dir/sigproc_results/analysis_return_code.txt" ) {
         log_msg(" No analysis_return_code.txt file found.  Creating one to be compatible with TSv3.4+\n");
