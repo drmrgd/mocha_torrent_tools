@@ -44,7 +44,7 @@ print colored('*'x75, 'bold yellow on_black');
 print "\n\n";
 
 my $scriptname = basename($0);
-my $version = "v4.6.4_062116-dev";
+my $version = "v4.6.5_062116-dev";
 my $description = <<"EOT";
 Program to grab data from an Ion Torrent Run and either archive it, or create a directory that can be imported 
 to another analysis computer for processing.  
@@ -205,19 +205,41 @@ if ( DEBUG_OUTPUT ) {
 
 ##----------------------------------------- End Command Arg Parsing ------------------------------------##
 
-# Files sufficient for a new export and reanalysis
-# TODO: maybe need to move this to a subroutine where we cna alter the list based on the server type?
-
 # Stage the intial components of either an extraction or archive.
 chdir $expt_dir || die "Can not access the results directory '$expt_dir': $!";
 print "$info Current working directory is: " . getcwd() . "\n" if DEBUG_OUTPUT;
-my $file_manifest = gen_filelist(\$server_type);
+
+# Generate a file manifest depending on the task and servertype
 # TODO:
-print ref $file_manifest , ' => ';
+my $file_manifest = gen_filelist(\$server_type);
 dd $file_manifest;
-version_check();
-#sample_key_gen();
-exit;
+
+# Generate a sampleKey.txt file
+# In this version (v5.0+) we need to use a different file for the sampleKeyGen script, but need to keep old
+# functionality until we fully upgrade the systems.  So, generate the version specific sampleKey.txt here.
+my $ts_version = version_check();
+my $old_version = version->parse('4.4.2');
+my $curr_version = version->parse($ts_version);
+
+if ($ts_version >= $old_version ) { 
+    log_msg(" $info TSv5.0+ run detected. Using 'ion_params_00.json file for sampleKey.txt file generation...\n");
+    sample_key_gen('new');
+} else {
+    log_msg(" $info An older version ($ts_version) was detected. Using sampleKeyGen call\n");
+    sample_key_gen('old');
+}
+
+# Check to see if there is a 'explog_final.txt' file in cwd or else try to get one from the 
+# pgm_logs.zip
+if ( ! -e "$expt_dir/explog_final.txt" ) {
+    log_msg(" $warn No explog_final.txt in $expt_dir. Attempting to get from pgm_logs.zip...\n");
+    if ( ! qx( unzip -j pgm_logs.zip explog_final.txt ) ) {
+        log_msg(" $err Can not extract explog_final.txt from the pgm_logs. Can not continue!\n");
+        halt( \$expt_dir, 1 );
+    } else {
+        log_msg(" $info Successfully retrieved the explog_final.txt file from the pgm_log.zip file\n");
+    }
+} 
 generate_return_code(\$expt_dir);
 
 sub gen_filelist {
@@ -425,40 +447,13 @@ sub data_extract {
 
 sub version_check {
     # Find out what TS version running in order to customize some downstream functions
-    # TODO: Update for TSS v5.0 and for S5 
     log_msg(" $info Checking TSS version for file path info...\n");
     
     open( my $ver_fh, "<", "version.txt" ) || die "$err can not open the version.txt file for reading: $!";
     (my $ts_version) = map { /Torrent_Suite=(.*)/ } <$ver_fh>;
-    #print "DEBUG: TSS version is '$ts_version'\n" if DEBUG_OUTPUT;
     log_msg("\tTSS version is '$ts_version'\n");
     close $ver_fh;
-
-    # In this version (v5.0+) we need to use a different file for the sampleKeyGen script, but need to keep old
-    # functionality until we fully upgrade the systems.  So, generate the version specific sampleKey.txt here.
-    my $old_version = version->parse('4.4.2');
-    my $curr_version = version->parse($ts_version);
-
-    if ($ts_version >= $old_version ) { 
-        log_msg(" $info TSv5.0+ run detected. Using 'ion_params_00.json file for sampleKey.txt file generation...\n");
-        sample_key_gen('new');
-    } else {
-        log_msg(" $info An older version ($ts_version) was detected. Using sampleKeyGen call\n");
-        sample_key_gen('old');
-    }
-
-    # Check to see if there is a 'explog_final.txt' file in cwd or else try to get one from the 
-    # pgm_logs.zip
-    if ( ! -e "$expt_dir/explog_final.txt" ) {
-        log_msg(" $warn No explog_final.txt in $expt_dir. Attempting to get from pgm_logs.zip...\n");
-        if ( ! qx( unzip -j pgm_logs.zip explog_final.txt ) ) {
-            log_msg(" $err Can not extract explog_final.txt from the pgm_logs. Can not continue!\n");
-            halt( \$expt_dir, 1 );
-        } else {
-            log_msg(" $info Successfully retrieved the explog_final.txt file from the pgm_log.zip file\n");
-        }
-    } 
-    return;
+    return $ts_version;
 }
 
 sub sample_key_gen {
