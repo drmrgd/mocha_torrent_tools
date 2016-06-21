@@ -44,7 +44,7 @@ print colored('*'x75, 'bold yellow on_black');
 print "\n\n";
 
 my $scriptname = basename($0);
-my $version = "v4.6.3_062116-dev";
+my $version = "v4.6.4_062116-dev";
 my $description = <<"EOT";
 Program to grab data from an Ion Torrent Run and either archive it, or create a directory that can be imported 
 to another analysis computer for processing.  
@@ -216,10 +216,8 @@ my $file_manifest = gen_filelist(\$server_type);
 print ref $file_manifest , ' => ';
 dd $file_manifest;
 version_check();
-# XXX
+#sample_key_gen();
 exit;
-
-sample_key_gen();
 generate_return_code(\$expt_dir);
 
 sub gen_filelist {
@@ -436,19 +434,18 @@ sub version_check {
     log_msg("\tTSS version is '$ts_version'\n");
     close $ver_fh;
 
-    # Used before for moving the Bead density paths.  Not needed anymore, but keep this skeleton code for any
-    # future use for which it might be helpful.
-    my $old_version = version->parse('4.2.1');
+    # In this version (v5.0+) we need to use a different file for the sampleKeyGen script, but need to keep old
+    # functionality until we fully upgrade the systems.  So, generate the version specific sampleKey.txt here.
+    my $old_version = version->parse('4.4.2');
     my $curr_version = version->parse($ts_version);
 
-    # NOTE: Not needed anymore.
-    #if ($ts_version >= $old_version ) { 
-        #log_msg(colored(" TSv4.2+ run detected. Making file and path adjustments...\n", "bold cyan on_black"));
-        #log_msg( "\tModifying path for Bead_density_data...\n" );
-        #map { (/Bead/) ? ($_ = basename($_)) : $_ } @exportFileList;
-    #} else {
-        #log_msg(" $info An older version ($ts_version) was detected. Using old paths\n");
-    #}
+    if ($ts_version >= $old_version ) { 
+        log_msg(" $info TSv5.0+ run detected. Using 'ion_params_00.json file for sampleKey.txt file generation...\n");
+        sample_key_gen('new');
+    } else {
+        log_msg(" $info An older version ($ts_version) was detected. Using sampleKeyGen call\n");
+        sample_key_gen('old');
+    }
 
     # Check to see if there is a 'explog_final.txt' file in cwd or else try to get one from the 
     # pgm_logs.zip
@@ -466,10 +463,11 @@ sub version_check {
 
 sub sample_key_gen {
     # Generate a sampleKey.txt file for the package
-    # TODO: Double check that sampleKeyGen works on S5 servers.
+    my $version = shift;
+    my $cmd;
+    ($version eq 'new') ? ($cmd = "sampleKeyGen.pl -r -o sampleKey.txt") : ($cmd = "sampleKeyGen -o sampleKey.txt");
     log_msg(" Generating a sampleKey.txt file for the export package...\n" );
-    eval { system( "cd $expt_dir && sampleKeyGen -o sampleKey.txt" ) };
-    if ($@) {
+    if ( system($cmd) ) {
         log_msg(" $err SampleKeyGen Script encountered errors: $@\n");
         halt( \$expt_dir, 1);
     }
