@@ -44,7 +44,7 @@ print colored('*'x75, 'bold yellow on_black');
 print "\n\n";
 
 my $scriptname = basename($0);
-my $version = "v4.6.9_062216-dev";
+my $version = "v4.6.10_062216-dev";
 my $description = <<"EOT";
 Program to grab data from an Ion Torrent Run and either archive it, or create a directory that can be imported 
 to another analysis computer for processing.  
@@ -465,8 +465,9 @@ sub sample_key_gen {
     my $version = shift;
     my $cmd;
     ($version eq 'new') ? ($cmd = "sampleKeyGen.pl -r -o sampleKey.txt") : ($cmd = "sampleKeyGen.pl -o sampleKey.txt");
+    #($version eq 'new') ? ($cmd = "sampleKeyGen -r -o sampleKey.txt") : ($cmd = "sampleKeyGen.pl -o sampleKey.txt");
     log_msg(" Generating a sampleKey.txt file for the export package...\n" );
-    unless (sys_cmd(\$cmd)) {
+    if (sys_cmd(\$cmd) != 0) {
         log_msg(" $err SampleKeyGen Script encountered errors!\n");
         halt( \$expt_dir, 1);
     }
@@ -474,9 +475,8 @@ sub sample_key_gen {
 }
 
 sub get_bams {
-    # Generate a zipfile of BAMs generated for each sample for the archive
-    # TODO: Double check that this can be done on S5 Server.
-    #my $zipfile = basename($expt_dir) . "_library_bams.zip";
+    # Generate a tar file of BAMs generated for each sample for the archive. No need to zip them as they can't be further 
+    # compressed.
     my $tarfile = basename($expt_dir) . "_library_bams.tar";
 
     open( my $sample_key, "<", "sampleKey.txt" );
@@ -485,7 +485,6 @@ sub get_bams {
 
     my $cwd = abs_path();
     opendir(my $dir, $cwd);
-    #my @bam_files = grep { /IonXpress.*\.bam(?:\.bai)?$/ } readdir($dir);
     my @bam_files = grep { /IonXpress.*\.bam$/ } readdir($dir);
 
     my @wanted_bams;
@@ -507,7 +506,15 @@ sub get_bams {
     }
 
     # XXX
-    system("tar qvcf $tarfile @wanted_bams");
+    #system("tar qvcf $tarfile @wanted_bams");
+    my $tar_cmd = "tar qvcf $tarfile @wanted_bams";
+    my $foo = sys_cmd(\$tar_cmd);
+    print "return: $foo\n";
+    exit;
+    unless (sys_cmd(\$tar_cmd)) {
+        log_msg(" $err There were issues creating the BAM tar file!\n");
+        halt(\$expt_dir, 1);
+    }
     return $tarfile;
 }
 
@@ -588,23 +595,27 @@ sub copy_data {
 }
 sub sys_cmd {
     # Execute a system call and return the exit code for diagnosis.
-    # XXX
     my $system_call = shift;
+    my $rc;
 
     print "DEBUG: Executing the following system call:\n\t$$system_call\n" if DEBUG_OUTPUT;
     system($$system_call);
 
     if ($? == -1) {
-        print "$err '$$system_call' failed to execute: $!\n";
-        return 0;
+        log_msg(" $err '$$system_call' failed to exectue: $!\n");
+        return $?;
     }
     elsif ($? & 127) {
-        printf "$err Process '%s' died with signal %d, %s coredump\n", $$system_call, ($? & 127),  ($? & 128) ? 'with' : 'without';
-        return 0;
+        $rc = ($? & 127);
+        log_msg(" $err Process 'system_call' died with signal $rc\n");
+        return $rc;
     } else {
-        printf "'%s' exited with value %d\n", $$system_call, $? >> 8 if DEBUG_OUTPUT;
-        return 1;
+        $rc = ($? >> 8);
+        return 0 if $rc == 0;
+        log_msg(" $err '$$system_call' exited with value $rc\n");
+        return $rc;
     }
+    return 0;
 }
 
 sub archive_data {
