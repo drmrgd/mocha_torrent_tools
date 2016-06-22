@@ -44,7 +44,7 @@ print colored('*'x75, 'bold yellow on_black');
 print "\n\n";
 
 my $scriptname = basename($0);
-my $version = "v4.6.8_062116-dev";
+my $version = "v4.6.9_062216-dev";
 my $description = <<"EOT";
 Program to grab data from an Ion Torrent Run and either archive it, or create a directory that can be imported 
 to another analysis computer for processing.  
@@ -379,14 +379,13 @@ sub data_archive {
     # Collect BAM files for the archive
     my $bamzip = get_bams();
     push(@$archivelist, $bamzip);
-    dd $archivelist;
-    exit;
 
     if ( DEBUG_OUTPUT ) {
         print "\n==============  DEBUG  ===============\n";
-        dd \$archivelist;
+        dd $archivelist;
         print "======================================\n\n";
     }
+    exit;
 
     # Run the archive subs
     #my ($status, $md5sum, $archive_dir) = archive_data( \@archivelist, $archive_name );
@@ -411,6 +410,7 @@ sub data_extract {
     # Create a place for our new data.
     my $destination_dir = create_dest( $outdir_path, '/results/xfer/' );
     print "Creating a copy of data in '$destination_dir from '$expt_dir' for export...\n";
+    # TODO: Alter this system call to use new sys_cmd() subroutine.
     system( "mkdir -p $destination_dir/$output/sigproc_results/" );
     my $sigproc_out = "$destination_dir/$output/sigproc_results/";
 
@@ -435,6 +435,7 @@ sub data_extract {
     chdir( $destination_dir );
     print "Creating a tarball of $output for export...\n";
 
+    # TODO: implement new sys_cmd() subroutine for these calls.
     if ( system( "tar cfz ${output}.tar.gz $output/" ) != 0 ) {
         print "$err Tarball creation of '$output' failed.\n";
         printf "child died with signal %d, %s coredump\n", 
@@ -463,10 +464,10 @@ sub sample_key_gen {
     # Generate a sampleKey.txt file for the package
     my $version = shift;
     my $cmd;
-    ($version eq 'new') ? ($cmd = "sampleKeyGen.pl -r -o sampleKey.txt") : ($cmd = "sampleKeyGen -o sampleKey.txt");
+    ($version eq 'new') ? ($cmd = "sampleKeyGen.pl -r -o sampleKey.txt") : ($cmd = "sampleKeyGen.pl -o sampleKey.txt");
     log_msg(" Generating a sampleKey.txt file for the export package...\n" );
-    if ( system($cmd) ) {
-        log_msg(" $err SampleKeyGen Script encountered errors: $@\n");
+    unless (sys_cmd(\$cmd)) {
+        log_msg(" $err SampleKeyGen Script encountered errors!\n");
         halt( \$expt_dir, 1);
     }
     return;
@@ -475,7 +476,8 @@ sub sample_key_gen {
 sub get_bams {
     # Generate a zipfile of BAMs generated for each sample for the archive
     # TODO: Double check that this can be done on S5 Server.
-    my $zipfile = basename($expt_dir) . "_library_bams.zip";
+    #my $zipfile = basename($expt_dir) . "_library_bams.zip";
+    my $tarfile = basename($expt_dir) . "_library_bams.tar";
 
     open( my $sample_key, "<", "sampleKey.txt" );
     my %samples = map{ chomp; split(/\t/) } <$sample_key>;
@@ -483,7 +485,8 @@ sub get_bams {
 
     my $cwd = abs_path();
     opendir(my $dir, $cwd);
-    my @bam_files = grep { /IonXpress.*\.bam(?:\.bai)?$/ } readdir($dir);
+    #my @bam_files = grep { /IonXpress.*\.bam(?:\.bai)?$/ } readdir($dir);
+    my @bam_files = grep { /IonXpress.*\.bam$/ } readdir($dir);
 
     my @wanted_bams;
     for my $bam (@bam_files) {
@@ -492,19 +495,35 @@ sub get_bams {
     }
 
     # Check to see if we need to generate a new zip archive or if we already have what we need.
-    # TODO: <<STOPPING POINT>>
-    # Determine if we really need a zip file of these BAMS or if we can get away with just a directory of them.  We can't 
-    # compress them much futher than they are, so why not speed this up with a non-cpression method instead.  Also, no need 
-    # to keep the BAI files.
-    my @zip_list = system("unzip -l $zipfile");
-    dd \@zip_list;
-    exit;
+    log_msg(" Generating a tar archive of the library BAM files for the package...\n");
+    if ( -e $tarfile ) { 
+        log_msg(" $info tar archive already exists, checking for completeness.\n");
+        if (check_tar($tarfile,\@wanted_bams)) {
+            log_msg(" \tTar archive appears to contain all the necessary files and is intact.  Using that file instead of creating new.\n");
+            return $tarfile;
+        } else {
+            log_msg(" \tThe original tar archive is not suitable for use, making a new one.\n");
+        }
+    }
 
-    # Generate a zip archive of the desired BAM files.
-    log_msg(" Generating a ZIP archive of BAM files for the package...\n");
-    system('zip', '-q', $zipfile, @wanted_bams );
+    # XXX
+    system("tar qvcf $tarfile @wanted_bams");
+    return $tarfile;
+}
 
-    return $zipfile;
+sub check_tar {
+    # Check to see if we need to generate a new tar archive of the BAM files or we can use what we already have.
+    my ($tar_file, $bam_list) = @_;
+
+    open(my $tar_read, "-|", "tar -tf $tar_file");
+    my @tar_list = map{ split(/\n/,$_) } <$tar_read>;
+    
+    my %counter;
+    foreach my $element (@$bam_list, @tar_list) {
+        $counter{$element}++;
+    }
+
+    (grep { $_ == 1 } values %counter) ? return 0 : return 1;
 }
 
 sub create_dest {
@@ -567,6 +586,26 @@ sub copy_data {
 	print "Copying file '$file' to '$location'...\n";
 	system( "cp $file $location" );
 }
+sub sys_cmd {
+    # Execute a system call and return the exit code for diagnosis.
+    # XXX
+    my $system_call = shift;
+
+    print "DEBUG: Executing the following system call:\n\t$$system_call\n" if DEBUG_OUTPUT;
+    system($$system_call);
+
+    if ($? == -1) {
+        print "$err '$$system_call' failed to execute: $!\n";
+        return 0;
+    }
+    elsif ($? & 127) {
+        printf "$err Process '%s' died with signal %d, %s coredump\n", $$system_call, ($? & 127),  ($? & 128) ? 'with' : 'without';
+        return 0;
+    } else {
+        printf "'%s' exited with value %d\n", $$system_call, $? >> 8 if DEBUG_OUTPUT;
+        return 1;
+    }
+}
 
 sub archive_data {
 	my $filelist = shift;
@@ -599,10 +638,11 @@ sub archive_data {
 	push( @$filelist, 'md5sum.txt' );
 
 	log_msg(" Creating a tarball archive of $archivename.\n");
+    # TODO: alter this system call to use new subroutine.
     if ( system( "tar cfz $archivename @$filelist" ) != 0 ) {
 		log_msg(" $err Tarball creation failed: $!.\n");
-        printf "child died with signal %d, %s coredump\n", 
-            ($? & 127), ($? & 128) ? 'with' : 'without';
+        #printf "child died with signal %d, %s coredump\n", 
+            #($? & 127), ($? & 128) ? 'with' : 'without';
         halt( \$expt_dir, 3 );
 	} else {
 		log_msg(" $info Tarball creation was successful.\n");
