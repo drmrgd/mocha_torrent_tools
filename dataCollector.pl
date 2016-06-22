@@ -44,7 +44,7 @@ print colored('*'x75, 'bold yellow on_black');
 print "\n\n";
 
 my $scriptname = basename($0);
-my $version = "v4.6.10_062216-dev";
+my $version = "v4.6.11_062216-dev";
 my $description = <<"EOT";
 Program to grab data from an Ion Torrent Run and either archive it, or create a directory that can be imported 
 to another analysis computer for processing.  
@@ -146,8 +146,12 @@ if ( ! defined $expt_type || $expt_type ne 'general' && $expt_type ne 'clinical'
 }
 
 # Get the absolute path of the target and starting dirs to make it easier.
+# XXX
 my $outdir_path = abs_path($outdir) if $outdir;
 my $expt_dir = abs_path($resultsDir);
+
+print "outdir : $outdir_path\n";
+exit;
 
 # Create logfile for archive process
 my $logfile = LOG_OUT;
@@ -481,8 +485,7 @@ sub get_bams {
     my %samples = map{ chomp; split(/\t/) } <$sample_key>;
     close $sample_key;
 
-    my $cwd = abs_path();
-    opendir(my $dir, $cwd);
+    opendir(my $dir, $expt_dir);
     my @bam_files = grep { /IonXpress.*\.bam$/ } readdir($dir);
 
     my @wanted_bams;
@@ -564,8 +567,13 @@ sub create_dest {
 sub copy_data {
 	my ( $file, $location ) = @_;
 	print "Copying file '$file' to '$location'...\n";
-	system( "cp $file $location" );
+	#system( "cp $file $location" );
+	if (sys_cmd(\"cp $file $location") != 0) {
+        log_msg(" $err There was an issue copying '$file' to '$location'!\n");
+        halt(\$expt_dir, 5);
+    }
 }
+
 sub sys_cmd {
     # Execute a system call and return the exit code for diagnosis.
     my $system_call = shift;
@@ -595,8 +603,12 @@ sub create_archive {
 	my $filelist = shift;
 	my $archivename = shift;
     
-	my $cwd = getcwd; 
     # TODO: Fix this!  Aperio no longer exists and is not a good default.
+    # <<stopping point>>
+    # Do we really want to do this in this way?  I think we're going to manually run this all of the time, or at least, if it's
+    # going to be automated, we'll use a wrapper script to determine if our destination mount point is alive.  We need to somehow
+    # batch things into this anyway.  So, let's make the '-d' option mandatory, remove the mount check and all of that garbage,
+    # and have this more explict in where it writes the data. 
     my $destination_dir = create_dest( $outdir_path, '/media/Aperio/' ); 
 
     # Check the fileshare before we start
@@ -654,18 +666,21 @@ sub create_archive {
 
 	if ( $? == 0 ) {
 		log_msg(" The archive is intact and not corrupt\n");
-		chdir( $cwd ) || die "Can't change directory to '$cwd': $!";
+		#chdir( $cwd ) || die "Can't change directory to '$cwd': $!";
+		chdir($expt_dir) || die "Can't change directory to '$expt_dir': $!";
         log_msg(" Removing the tmp data\n");
 		remove_tree( $tmpdir );
 	} 
 	elsif ( $? == 1 ) {
 		log_msg(" $err There was a problem with the archive integrity.  Archive creation halted.\n");
-		chdir( $cwd ) || die "Can't change dir back to '$cwd': $!";
+		#chdir( $cwd ) || die "Can't change dir back to '$cwd': $!";
+		chdir($expt_dir) || die "Can't change dir back to '$expt_dir': $!";
 		remove_tree( $tmpdir );
 		return 0;
 	} else {
 		log_msg(" $err An error with the md5sum check was encountered: $?\n");
-		chdir( $cwd ) || die "Can't change dir back to '$cwd': $!";
+		#chdir( $cwd ) || die "Can't change dir back to '$cwd': $!";
+		chdir($expt_dir) || die "Can't change dir back to '$expt_dir': $!";
 		remove_tree( $tmpdir );
 		return 0;
 	}
@@ -685,7 +700,7 @@ sub create_archive {
 	
     if ( DEBUG_OUTPUT ) {
         print "\n==============  DEBUG  ===============\n";
-        print "\tpwd: $cwd\n";
+        print "\tpwd: $expt_dir\n";
         print "\tpath: $archive_dir\n";
         print "======================================\n\n";
     }
@@ -747,6 +762,7 @@ sub halt {
         2  => "failed checksum",
         3  => "tarball creation failure",
         4  => "unspecified error",
+        5  => "general system error",
     );
     my $error = colored($fail_codes{$code}, 'bold red on_black');
 
