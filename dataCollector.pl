@@ -465,7 +465,6 @@ sub sample_key_gen {
     my $version = shift;
     my $cmd;
     ($version eq 'new') ? ($cmd = "sampleKeyGen.pl -r -o sampleKey.txt") : ($cmd = "sampleKeyGen.pl -o sampleKey.txt");
-    #($version eq 'new') ? ($cmd = "sampleKeyGen -r -o sampleKey.txt") : ($cmd = "sampleKeyGen.pl -o sampleKey.txt");
     log_msg(" Generating a sampleKey.txt file for the export package...\n" );
     if (sys_cmd(\$cmd) != 0) {
         log_msg(" $err SampleKeyGen Script encountered errors!\n");
@@ -508,10 +507,7 @@ sub get_bams {
     # XXX
     #system("tar qvcf $tarfile @wanted_bams");
     my $tar_cmd = "tar qvcf $tarfile @wanted_bams";
-    my $foo = sys_cmd(\$tar_cmd);
-    print "return: $foo\n";
-    exit;
-    unless (sys_cmd(\$tar_cmd)) {
+    if (sys_cmd(\$tar_cmd) != 0) {
         log_msg(" $err There were issues creating the BAM tar file!\n");
         halt(\$expt_dir, 1);
     }
