@@ -372,24 +372,23 @@ sub check_data_package() {
 
 sub data_archive {
     # Run full archive on data.
-    # TODO: going to pull the data manifest in as an array.
     my $archivelist = shift;
     my $archive_name = "$output.tar.gz";
 
     # Collect BAM files for the archive
-    my $bamzip = get_bams();
-    push(@$archivelist, $bamzip);
+    my $bam_files = get_bams();
+    push(@$archivelist, $bam_files);
 
     if ( DEBUG_OUTPUT ) {
         print "\n==============  DEBUG  ===============\n";
         dd $archivelist;
         print "======================================\n\n";
     }
-    exit;
 
     # Run the archive subs
-    #my ($status, $md5sum, $archive_dir) = archive_data( \@archivelist, $archive_name );
-    my ($status, $md5sum, $archive_dir) = archive_data( $archivelist, $archive_name );
+    # TODO:
+    my ($status, $md5sum, $archive_dir) = create_archive( $archivelist, $archive_name );
+
     if ( $status == 1 ) {
         log_msg(" Archival of experiment '$output' completed successfully\n\n");
         print "Experiment archive completed successfully\n" if $quiet;
@@ -504,9 +503,7 @@ sub get_bams {
         }
     }
 
-    # XXX
-    #system("tar qvcf $tarfile @wanted_bams");
-    my $tar_cmd = "tar qvcf $tarfile @wanted_bams";
+    my $tar_cmd = "tar cf $tarfile @wanted_bams";
     if (sys_cmd(\$tar_cmd) != 0) {
         log_msg(" $err There were issues creating the BAM tar file!\n");
         halt(\$expt_dir, 1);
@@ -525,7 +522,6 @@ sub check_tar {
     foreach my $element (@$bam_list, @tar_list) {
         $counter{$element}++;
     }
-
     (grep { $_ == 1 } values %counter) ? return 0 : return 1;
 }
 
@@ -565,25 +561,6 @@ sub create_dest {
     return $destination_dir;
 }
 
-sub generate_return_code {
-    # Add 'analysis_return_code' file to be compatible with TSv3.4+
-    my $expt_dir = shift;
-    log_msg(" Checking for analysis_return_code.txt file...\n");
-    log_msg("\tNo longer needed for runs newer than v3.4+.  To be removed!\n");
-    return;
-
-    if ( ! -e "$$expt_dir/sigproc_results/analysis_return_code.txt" ) {
-        log_msg(" No analysis_return_code.txt file found.  Creating one to be compatible with TSv3.4+\n");
-        my $arc_file = "$$expt_dir/sigproc_results/analysis_return_code.txt";
-        open( my $arc_fh, ">", $arc_file ) || die "Can't created an analysis_return_code.txt file: $!";
-        print $arc_fh "0";
-        close $arc_fh;
-    } else {
-        log_msg(" Found analysis_return_code.txt file. Adding to the export file list\n");
-    }
-    return;
-}
-
 sub copy_data {
 	my ( $file, $location ) = @_;
 	print "Copying file '$file' to '$location'...\n";
@@ -614,7 +591,7 @@ sub sys_cmd {
     return 0;
 }
 
-sub archive_data {
+sub create_archive {
 	my $filelist = shift;
 	my $archivename = shift;
     
