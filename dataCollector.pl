@@ -33,7 +33,7 @@ use Email::MIME;
 use Email::Sender::Simple qw(sendmail);
 
 use constant DEBUG_OUTPUT => 1;
-use constant LOG_OUT      => \*STDOUT;
+use constant LOG_OUT       => '/results/data_collect_dev/test.log';
 #use constant LOG_OUT      => "$ENV{'HOME'}/datacollector_dev.log";
 #use constant LOG_OUT      => "/var/log/mocha/archive.log";
 
@@ -69,7 +69,7 @@ USAGE: $scriptname [options] [-t] <'clinical', 'general'> [-a | -e] <results dir
     -c, --case       Case number to use for new directory generation
     -O, --OCP        Run is from OCP; Variant calling data on IR / MATCHbox, don't include in archive.
     -o, --output     Custom output file name.  (DEFAULT: 'run_name.mmddyyy')
-    -d, --dir        Custom output / destination  directory (DEFAULT: /results/xfer/ for extract and /media/Aperio for archive)
+    -d, --dir        Destination  directory for packaged data (DEFAULT: /media/dtp_mocha_share)
     -r, --randd      Server is R&D server; do not email notify group and be more flexible with missing data.
     -s, --server     Server type.  Can be PGM or S5 (DEFAULT: PGM).
     -q, --quiet      Run quietly without sending messages to STDOUT
@@ -83,7 +83,7 @@ my $archive;
 my $extract;
 my $output;
 my $quiet;
-my $outdir;
+my $outdir = '/media/dtp_mocha_share/';
 my $case_num;
 my $r_and_d;
 my $ocp_run;
@@ -118,7 +118,6 @@ sub print_version {
 help if $help;
 print_version if $ver_info;
 
-
 # Format the logfile output
 $Text::Wrap::columns = 123;
 my $space = ' ' x ( length( timestamp('timestamp') ) + 3 );
@@ -126,7 +125,7 @@ my $warn =  colored("WARN:", 'bold yellow on_black');
 my $info =  colored("INFO:", 'bold green on_black');
 my $err =   colored("ERROR:", 'bold red on_black');
 
-# Make sure that there is an appropriate Results Dir sent to script
+# Make sure that there is an appropriate results directory sent to script
 my $resultsDir = shift @ARGV;
 if ( ! defined $resultsDir ) {
 	print "$err No results directory was entered.  Please select the results directory to process.\n\n";
@@ -172,6 +171,9 @@ sub log_msg {
     print $msg timestamp('timestamp') . $text;
     return;
 }
+
+log_msg("this is a test");
+exit;
 
 # Verify that the server type is valid.
 my @valid_servers = qw( PGM S5 S5-XL S5XL );
