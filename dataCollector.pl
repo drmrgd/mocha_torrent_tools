@@ -44,7 +44,7 @@ print colored('*'x75, 'bold yellow on_black');
 print "\n\n";
 
 my $scriptname = basename($0);
-my $version = "v4.6.11_062216-dev";
+my $version = "v4.7.0_071416-dev";
 my $description = <<"EOT";
 Program to grab data from an Ion Torrent Run and either archive it, or create a directory that can be imported 
 to another analysis computer for processing.  
@@ -62,14 +62,13 @@ the data collected in the export option as well.
 EOT
 
 my $usage = <<"EOT";
-USAGE: $scriptname [options] [-t] <'clinical', 'general'> [-a | -e] <results dir>
+USAGE: $scriptname [options] [-t] <'clinical', 'general'> [-a | -e] <results_dir> <destination_dir>
     -t, --type       Type of experiment data to be archived ('clinical', 'general').
     -a, --archive    Create tarball archive of the run data
     -e, --extract    Extract the data for re-analysis on another computer.
     -c, --case       Case number to use for new directory generation
     -O, --OCP        Run is from OCP; Variant calling data on IR / MATCHbox, don't include in archive.
     -o, --output     Custom output file name.  (DEFAULT: 'run_name.mmddyyy')
-    -d, --dir        Destination  directory for packaged data (DEFAULT: /media/dtp_mocha_share)
     -r, --randd      Server is R&D server; do not email notify group and be more flexible with missing data.
     -s, --server     Server type.  Can be PGM or S5 (DEFAULT: PGM).
     -q, --quiet      Run quietly without sending messages to STDOUT
@@ -83,7 +82,6 @@ my $archive;
 my $extract;
 my $output;
 my $quiet;
-my $outdir = '/media/dtp_mocha_share/';
 my $case_num;
 my $r_and_d;
 my $ocp_run;
@@ -96,7 +94,6 @@ GetOptions( "help|h"      => \$help,
             "extract|e"   => \$extract,
             "archive|a"   => \$archive,
             "output|o=s"  => \$output,
-            "dir|d=s"     => \$outdir,
             "case|c=s"    => \$case_num,
             "randd|r"     => \$r_and_d,
             "OCP|O"       => \$ocp_run,
@@ -145,12 +142,11 @@ if ( ! defined $expt_type || $expt_type ne 'general' && $expt_type ne 'clinical'
 }
 
 # Get the absolute path of the target and starting dirs to make it easier.
-# XXX
-my $outdir_path = abs_path($outdir) if $outdir;
 my $expt_dir = abs_path($resultsDir);
 
-print "outdir : $outdir_path\n";
-exit;
+my $outdir_path;
+my $outdir = shift @ARGV || do { print "$err No destination directory input.  You must indicate a destination directory into which we'll put the data!\n\n"; die "$usage\n" };
+(-d $outdir) ? ($outdir_path = abs_path($outdir)) : die "$err Destination directory '$outdir' can not be found!\n";
 
 # Create logfile for archive process
 my $logfile = LOG_OUT;
@@ -171,9 +167,6 @@ sub log_msg {
     print $msg timestamp('timestamp') . $text;
     return;
 }
-
-log_msg("this is a test");
-exit;
 
 # Verify that the server type is valid.
 my @valid_servers = qw( PGM S5 S5-XL S5XL );
@@ -243,9 +236,6 @@ if ( ! -e "$expt_dir/explog_final.txt" ) {
         log_msg(" $info Successfully retrieved the explog_final.txt file from the pgm_log.zip file\n");
     }
 } 
-
-# NOTE: Remove this after some testing.  We no longer need to deal with this patch I think.
-generate_return_code(\$expt_dir);
 
 # Generate a file manifest depending on the task and servertype
 my $file_manifest = gen_filelist(\$server_type, \$ts_version);
@@ -479,8 +469,7 @@ sub sample_key_gen {
 }
 
 sub get_bams {
-    # Generate a tar file of BAMs generated for each sample for the archive. No need to zip them as they can't be further 
-    # compressed.
+    # Generate a tarfile of BAMs for the archive. No need to zip them as they can't be further compressed.
     my $tarfile = basename($expt_dir) . "_library_bams.tar";
 
     open( my $sample_key, "<", "sampleKey.txt" );
@@ -530,46 +519,9 @@ sub check_tar {
     (grep { $_ == 1 } values %counter) ? return 0 : return 1;
 }
 
-sub create_dest {
-    # Create a place to put the data.
-    my $outdir = shift;
-    my $default = shift;
-
-    my $destination_dir;
-    ( $outdir ) ? ($destination_dir = $outdir) : ($destination_dir = $default);
-
-    if ( ! -e $destination_dir ) {
-        print "$warn The destination directory '$destination_dir' does not exist.\n";
-        while (1) {
-            print "(c)reate, (n)ew directory, (q)uit: ";
-            chomp( my $resp = <STDIN> );
-            if ( $resp !~ /[cnq]/ ) {
-                print "$err Not a valid response.\n";
-            }
-            elsif ( $resp eq 'c' ) {
-                print "Creating the directory '$destination_dir'...\n";
-                mkdir $destination_dir;
-                last;
-            }
-            elsif( $resp eq 'n' ) {
-                print "New target dir: ";
-                chomp( $destination_dir = <STDIN>);
-                print "New location selected: $destination_dir. Creating the new directory\n";
-                mkdir $destination_dir;
-                last;
-            } else {
-                print "Exiting.\n";
-                exit 1;
-            }
-        }
-    }
-    return $destination_dir;
-}
-
 sub copy_data {
 	my ( $file, $location ) = @_;
 	print "Copying file '$file' to '$location'...\n";
-	#system( "cp $file $location" );
 	if (sys_cmd(\"cp $file $location") != 0) {
         log_msg(" $err There was an issue copying '$file' to '$location'!\n");
         halt(\$expt_dir, 5);
@@ -605,24 +557,17 @@ sub create_archive {
 	my $filelist = shift;
 	my $archivename = shift;
     
-    # TODO: Fix this!  Aperio no longer exists and is not a good default.
-    # <<stopping point>>
-    # Do we really want to do this in this way?  I think we're going to manually run this all of the time, or at least, if it's
-    # going to be automated, we'll use a wrapper script to determine if our destination mount point is alive.  We need to somehow
-    # batch things into this anyway.  So, let's make the '-d' option mandatory, remove the mount check and all of that garbage,
-    # and have this more explict in where it writes the data. 
-    my $destination_dir = create_dest( $outdir_path, '/media/Aperio/' ); 
-
-    # Check the fileshare before we start
-    mount_check(\$destination_dir);
-
     # Create a archive subdirectory to put all data in.
     my $archive_dir;
     if ( $case_num ) {
-        $archive_dir = create_archive_dir( \$case_num, \$destination_dir);
+        #$archive_dir = create_archive_dir( \$case_num, \$destination_dir);
+        $archive_dir = create_archive_dir( \$case_num, \$outdir_path);
     } else {
-        $archive_dir = $destination_dir;
+        $archive_dir = $outdir_path;
     }
+
+    print "DEBUG: archive directory: $archive_dir\n";
+    exit;
     
 	# Create a checksum file for all of the files in the archive and add it to the tarball 
     # TODO: Can i optimize this at all?  
@@ -771,22 +716,6 @@ sub halt {
     log_msg(" The archive script failed due to '$error' and is unable to continue.\n\n");
     send_mail( "failure", \$case_num, \$expt_name, undef, \$expt_type );
 	exit 1;
-}
-
-sub mount_check {
-	# Double check that the destination filesystem is mounted before we begin. 
-	my $mount_point = shift;
-    $$mount_point =~ s/\/$//; # Get rid of terminal forward slash to match mount info
-
-    open ( my $mount_fh, "<", '/proc/mounts' ) || die "Can't open '/proc/mounts' for reading: $!";
-    if ( grep { /$$mount_point/ } <$mount_fh> ) {
-        log_msg(" The remote fileshare is mounted and accessible.\n");
-    } 
-    elsif ( -e $$mount_point && dirname($$mount_point) ne '/media' ) {
-        log_msg(" The remote fileshare is mounted and accessible.\n");
-    } else {
-        log_msg(" $err The remove fileshare is not mounted! You must mount this share before proceeding.\n");
-    }
 }
 
 sub process_md5_files {
