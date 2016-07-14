@@ -44,7 +44,7 @@ print colored('*'x75, 'bold yellow on_black');
 print "\n\n";
 
 my $scriptname = basename($0);
-my $version = "v4.7.0_071416-dev";
+my $version = "v4.7.1_071416-dev";
 my $description = <<"EOT";
 Program to grab data from an Ion Torrent Run and either archive it, or create a directory that can be imported 
 to another analysis computer for processing.  
@@ -269,7 +269,7 @@ sub gen_filelist {
         explog_final.txt
         explog.txt
         pgm_logs.zip
-        ionparams_00.json 
+        ion_params_00.json 
         report.pdf
         version.txt
         sysinfo.txt
@@ -282,7 +282,7 @@ sub gen_filelist {
     my @s5_file_list = qw(
         basecaller_results/BaseCaller.json
         expMeta.dat
-        serialzed*json
+        serialized*json
         );
 
     # Only available on PGM
@@ -333,8 +333,14 @@ sub check_data_package() {
 
     log_msg(" $info Checking for mandatory, run specific data...");
 
-    # Check to be sure that all of the results logs are there or exit so we don't miss anything
-    if ( ! grep { /variantCaller_out/ } @$archivelist ) {
+    # First let's just check the regular files that we must always have.
+    for my $file (@$archivelist) {
+        next if $file =~ /^plugin_out/;
+        die "$err Can't find file '$file'!!\n" unless (grep {-e} glob $file);
+    }
+
+    # Now check to be sure that all of the plugin data we want for different run types are there
+   if ( ! grep { /variantCaller_out/ } @$archivelist ) {
         if ( $r_and_d || $ocp_run ) {
             log_msg(" $warn No TVC results directory. Skipping...\n");
         } else {
@@ -384,6 +390,7 @@ sub data_archive {
     # Run the archive subs
     # TODO:
     my ($status, $md5sum, $archive_dir) = create_archive( $archivelist, $archive_name );
+    exit;
 
     if ( $status == 1 ) {
         log_msg(" Archival of experiment '$output' completed successfully\n\n");
@@ -566,9 +573,6 @@ sub create_archive {
         $archive_dir = $outdir_path;
     }
 
-    print "DEBUG: archive directory: $archive_dir\n";
-    exit;
-    
 	# Create a checksum file for all of the files in the archive and add it to the tarball 
     # TODO: Can i optimize this at all?  
 	log_msg(" Creating an md5sum list for all archive files.\n");
@@ -579,6 +583,7 @@ sub create_archive {
 	}
 	process_md5_files( $filelist );
 	push( @$filelist, 'md5sum.txt' );
+    exit;
 
 	log_msg(" Creating a tarball archive of $archivename.\n");
     # TODO: alter this system call to use new subroutine.
