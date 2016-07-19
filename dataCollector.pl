@@ -47,7 +47,7 @@ print colored('*'x75, 'bold yellow on_black');
 print "\n\n";
 
 my $scriptname = basename($0);
-my $version = "v4.8.1_071916-dev";
+my $version = "v4.8.3_071916-dev";
 my $description = <<"EOT";
 Program to grab data from an Ion Torrent Run and either archive it, or create a directory that can be imported 
 to another analysis computer for processing.  
@@ -181,7 +181,7 @@ unless ( grep{$_ eq $server_type} @valid_servers ) {
 }
 
 # Setup custom and default output names
-my ( $run_name ) = $expt_dir =~ /((?:S5-)[MP]C[C12345]-\d+.*_\d+)\/?$/;;
+my ( $run_name ) = $expt_dir =~ /((?:S5-)?[MP]C[C12345]-\d+.*_\d+)\/?$/;;
 $output = "$run_name." . timestamp('date') if ( ! defined $output );
 
 my $method; 
@@ -757,7 +757,7 @@ sub halt {
     my $error = colored($fail_codes{$code}, 'bold red on_black');
 
     log_msg(" The archive script failed due to '$error' and is unable to continue.\n\n");
-    send_mail( "failure", \$case_num, \$expt_name, undef, \$expt_type );
+    send_mail( "failure", \$case_num, $expt_name, undef, \$expt_type );
 	exit 1;
 }
 
@@ -832,16 +832,11 @@ sub create_archive_dir {
 
 sub send_mail {
     # Send out a system email upon error or completion of archive
-    my $status = shift;
-    my $case = shift;
-    my $outdir = shift;
-    my $md5sum = shift;
-    my $type = shift;
+    my ($status, $case, $outdir, $md5sum, $type) = @_;
     my @additional_recipients;
 
     $$case //= "---"; 
-    # TODO: Need to fix this regex for new S5 servers.
-    my ($pgm_name) = $run_name =~ /([PM]C[123C]-\d+)/;
+    my ($pgm_name) = $run_name =~ /(?:S5-)?([PM]C[C12345]-\d+)/;
     $pgm_name //= 'Unknown';
     (my $time = timestamp('timestamp')) =~ s/[\[\]]//g;
 
