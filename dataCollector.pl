@@ -47,7 +47,7 @@ print colored('*'x75, 'bold yellow on_black');
 print "\n\n";
 
 my $scriptname = basename($0);
-my $version = "v4.8.3_071916-dev";
+my $version = "v4.8.4_071916-dev";
 my $description = <<"EOT";
 Program to grab data from an Ion Torrent Run and either archive it, or create a directory that can be imported 
 to another analysis computer for processing.  
@@ -221,7 +221,7 @@ my $ts_version = version_check();
 my $old_version = version->parse('4.4.2');
 my $curr_version = version->parse($ts_version);
 
-if ($ts_version >= $old_version ) { 
+if ($curr_version > $old_version) {
     log_msg(" $info TSv5.0+ run detected. Using 'ion_params_00.json file for sampleKey.txt file generation...\n");
     sample_key_gen('new');
 } else {
