@@ -10,6 +10,8 @@
 # the copied archive is compared to the original to make sure it did not get corrupted during the transfer
 # and if successful the local copy is deleted.
 #
+#
+#
 # 4/12/13 - D Sims
 ############################################################################################################
 use warnings;
@@ -29,6 +31,7 @@ use File::Path qw(remove_tree);
 use Getopt::Long qw(:config bundling auto_abbrev no_ignore_case);
 use Data::Dump;
 use File::Slurp;
+use File::Find;
 use Email::MIME;
 use Email::Sender::Simple qw(sendmail);
 
@@ -44,7 +47,7 @@ print colored('*'x75, 'bold yellow on_black');
 print "\n\n";
 
 my $scriptname = basename($0);
-my $version = "v4.7.1_071416-dev";
+my $version = "v4.8.1_071916-dev";
 my $description = <<"EOT";
 Program to grab data from an Ion Torrent Run and either archive it, or create a directory that can be imported 
 to another analysis computer for processing.  
@@ -258,9 +261,10 @@ elsif ($archive) {
 
 sub gen_filelist {
     # output a file manifest depending on the type of server (PGM or S5) and the software version.
-    # For S5 exportation, need the whole sigproc_results directory with the 96 blocks (~135GB), and have to put that into an
-    # 'onboard_results' directory for processing.  Then add in the normal directoories and files in the root directory.
-    
+    # For S5 exportation, need the whole sigproc_results directory with the 96 blocks (~135GB), and have to put that 
+    # into an 'onboard_results' directory for processing.  Then add in the normal directoories and files in the root 
+    # directory.
+
     my ($platform,$version) = @_;
     
     # Get from any platform
@@ -275,7 +279,6 @@ sub gen_filelist {
         sysinfo.txt
         InitLog.txt
         sampleKey.txt
-        sigproc_results/*
         );
 
     # Only available on S5
@@ -283,6 +286,7 @@ sub gen_filelist {
         basecaller_results/BaseCaller.json
         expMeta.dat
         serialized*json
+        sigproc_results/
         );
 
     # Only available on PGM
@@ -317,26 +321,53 @@ sub gen_filelist {
         #push( @$archivelist, "plugin_out/$plugin_data" ) if grep { $plugin_data =~ /$_/ } @wanted_plugins;
     #}
 
-    opendir( my $plugin_dir, "plugin_out" ); 
-    my @plugin_results = map {'plugin_out/' . $_ } sort( grep { !/^\.+$/ } readdir( $plugin_dir) );
-    my @file_manifest = (@common_list, @plugin_results);
-    ($$platform eq 'S5') ? push(@file_manifest, @s5_file_list) : push(@file_manifest, @pgm_file_list);
+    # Load up the plugins results and start to generate the master file manifest.
+    our @found_files;
+    sub wanted {
+        return if -d;
+        push(@found_files, $File::Find::name);
+        #print "$File::Find::name\n";
+    }
+    find(\&wanted, 'plugin_out');
+    my @plugin_results = @found_files;
+
+
+    # Add platform specific files to the manifest.
+    my @file_manifest;
+    if ($$platform eq 'S5') {
+        @found_files = ();
+        for my $elem (@s5_file_list) {
+            find(\&wanted, glob $elem);
+        }
+        @file_manifest = (@common_list, @plugin_results, @found_files);
+    } else {
+        @file_manifest = (@common_list, @pgm_file_list, @plugin_results);
+    }
+
+    dd \@file_manifest;
+    __exit__();
 
     my $package_intact = check_data_package(\@file_manifest, $ts_version, $platform);
-    ($package_intact) ?  log_msg(" All data located.  Proceeding with archive creation\n") : halt(\$expt_dir, 1);
+    #my $package_intact = check_data_package($final_filelist, $ts_version, $platform);
+    ($package_intact) ?  log_msg(" All data located. Proceeding with archive creation\n") : halt(\$expt_dir, 1);
 
+    # XXX
+    #dd $final_filelist;
+    __exit__();
+    #return $final_filelist;
     return \@file_manifest;
 }
 
-sub check_data_package() {
+sub check_data_package {
     my ($archivelist, $version, $platform) = @_;
 
-    log_msg(" $info Checking for mandatory, run specific data...");
+    log_msg(" $info Checking for mandatory, run specific data...\n");
 
     # First let's just check the regular files that we must always have.
     for my $file (@$archivelist) {
         next if $file =~ /^plugin_out/;
-        die "$err Can't find file '$file'!!\n" unless (grep {-e} glob $file);
+        #die "$err Can't find file '$file'!!\n" unless (grep {-e} glob $file);
+        die "$err Can't find file '$file'!!\n" unless (grep {-e} $file);
     }
 
     # Now check to be sure that all of the plugin data we want for different run types are there
@@ -390,7 +421,7 @@ sub data_archive {
     # Run the archive subs
     # TODO:
     my ($status, $md5sum, $archive_dir) = create_archive( $archivelist, $archive_name );
-    exit;
+    __exit__();
 
     if ( $status == 1 ) {
         log_msg(" Archival of experiment '$output' completed successfully\n\n");
@@ -575,6 +606,12 @@ sub create_archive {
 
 	# Create a checksum file for all of the files in the archive and add it to the tarball 
     # TODO: Can i optimize this at all?  
+    #
+    # <<<  STOPPING POINT >>>
+    # This needs to be reworked so that it'll work with the new directory struction.  If we have an S5 run,
+    # then we need to consider that sigproc_results will be several directories.  If it's a PGM run, then 
+    # it's only one directory and actually the files will be separate.  Maybe I should expand the list when 
+    # I'm creating the archivelist?
 	log_msg(" Creating an md5sum list for all archive files.\n");
 
 	if ( -e 'md5sum.txt' ) {
@@ -583,7 +620,8 @@ sub create_archive {
 	}
 	process_md5_files( $filelist );
 	push( @$filelist, 'md5sum.txt' );
-    exit;
+    # XXX
+    __exit__();
 
 	log_msg(" Creating a tarball archive of $archivename.\n");
     # TODO: alter this system call to use new subroutine.
@@ -863,7 +901,7 @@ sub send_mail {
     $content =~ s/%%PGM%%/$pgm_name/g;
     $content =~ s/%%MD5%%/$$md5sum/g;
     $content =~ s/%%DATE%%/$time/g;
-
+glob 
     my $message = Email::MIME->create(
         header_str => [
             From     => 'ionadmin@'.$hostname.'.ncifcrf.gov',
@@ -880,4 +918,11 @@ sub send_mail {
         );
 
         sendmail($message);
+}
+
+sub __exit__ {
+    # Dev exit code just to help with figuring out where I am. 
+    # TODO: Remove this prior to launch.
+    print "Got exit signal at line: " . __LINE__ . "\n";
+    exit;
 }
