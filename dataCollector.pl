@@ -17,6 +17,7 @@
 use warnings;
 use strict;
 use version;
+use threads;
 use autodie;
 
 use File::Basename;
@@ -34,6 +35,7 @@ use File::Slurp;
 use File::Find;
 use Email::MIME;
 use Email::Sender::Simple qw(sendmail);
+use Parallel::ForkManager;
 
 use constant DEBUG_OUTPUT => 1;
 use constant LOG_OUT       => '/results/data_collect_dev/test.log';
@@ -47,7 +49,7 @@ print colored('*'x75, 'bold yellow on_black');
 print "\n\n";
 
 my $scriptname = basename($0);
-my $version = "v4.8.5_071916-dev";
+my $version = "v4.8.6_071916-dev";
 my $description = <<"EOT";
 Program to grab data from an Ion Torrent Run and either archive it, or create a directory that can be imported 
 to another analysis computer for processing.  
@@ -569,6 +571,87 @@ sub sys_cmd {
     return 0;
 }
 
+sub generate_md5sum_threaded {
+    use threads;
+    my $filelist = shift;
+    my @threads;
+    foreach (@$filelist) {
+        next if -l $_;
+        push(@threads, threads->new(\&calc_md5sum, $_));
+    }
+    foreach(@threads) {
+        $_->join();
+    }
+
+    sub calc_md5sum {
+        my $file = shift;
+        open( my $out_fh, ">>", 'md5sum.txt');
+        #print "Processing $file...\n";
+        eval {
+            open(my $input_fh, "<", $file);
+            binmode($input_fh);
+            my $ctx = Digest::MD5->new;
+            $ctx->addfile(*$input_fh);
+            my $digest = $ctx->hexdigest;
+            print $out_fh "$digest  $file\n";
+            close $input_fh;
+        };
+        #my $val = `md5sum $file`;
+        #print {$out_fh} $val;
+
+        if ( $@ ) {
+            log_msg(" $@\n");
+            halt(\$expt_dir, 2);
+        }
+    }
+}
+
+sub generate_md5sum_forked {
+    # TODO:
+    # <<<< Stopping Point >>>>
+    # This is the way forward.  Using forks is muhc, much less memory consumptive than using threaeds,
+    # and even though we'll have to install the module, I think this is the clear winner.  Have to keep
+    # working on refining:
+    #   1.  How many processes to run?  128 is OK, but maybe 64 is better to not hog too many resources.  seeing 
+    #       some I/O problems due to too many 'D' statuses.  Reduce to maybe 64 or less?
+    #   2.  can I verify the MD5sum file is working OK?
+    #   3.  Remove the threading call and clean up.
+    #   4.  Get a better calculator for the total number of files to process
+    #   5.  do I need to (should i?) skip the symlinked files?
+    #   6.  Shoudl I use tghe system md5sum or use the Perl module?
+    # Can I multithread this to make it a little faster for these bigger S5 runs?
+    __exit__(__LINE__, '<<<<  STOPPING POINT >>>>');
+	my $filelist = shift;
+    #dd $filelist;
+    #exit;
+    my $md5_list = 'md5sum.txt';
+    open(my $md5_fh, ">>", $md5_list);
+    #my $fork = new Parallel::ForkManager(24);
+    my $fork = new Parallel::ForkManager(128);
+    foreach (@$filelist) {
+        next if -l $_;
+        $fork->start and next;
+        eval {
+            #my $val = `md5sum $_`;
+            #print {$md5_fh} $val;
+            open(my $input_fh, "<", $_);
+            binmode($input_fh);
+            my $ctx = Digest::MD5->new;
+            $ctx->addfile(*$input_fh);
+            my $digest = $ctx->hexdigest;
+            print {$md5_fh} "$digest  $_\n";
+            close $input_fh;
+        };
+
+        if ( $@ ) {
+            log_msg(" $@\n");
+            halt(\$expt_dir, 2);
+        }
+        $fork->finish;
+    }
+    $fork->wait_all_children;
+}
+
 sub create_archive {
     my ($filelist, $archivename) = @_;
     
@@ -593,7 +676,12 @@ sub create_archive {
 		log_msg(" $info md5sum.txt file already exists in this directory. Creating fresh list.\n");
 		unlink( 'md5sum.txt' );
 	}
-	generate_md5sum( $filelist );
+    # NOTE: This is calculating all files, but some are symlinks and we'd prefer to skip those.  How to compute
+    #       without symlinks?
+    printf "calculating MD5Sum for %s files\n", scalar(@$filelist);
+    #generate_md5sum( $filelist );
+    #generate_md5sum_threaded( $filelist );
+    generate_md5sum_forked( $filelist );
 	push( @$filelist, 'md5sum.txt' );
     # XXX
     __exit__(__LINE__);
@@ -736,28 +824,41 @@ sub halt {
 	exit 1;
 }
 
-sub generate_md5sum {
-	my $filelist = shift;
-    my $md5_list = 'md5sum.txt';
-    open(my $md5_fh, ">>", $md5_list);
-    for my $file (@$filelist) {
-        next if -l $file;
-        eval {
-            open( my $input_fh, "<", $file ) || die "Can't open the input file '$file': $!";
-            binmode( $input_fh );
-            my $ctx = Digest::MD5->new;
-            $ctx->addfile( *$input_fh );
-            my $digest = $ctx->hexdigest;
-            print $md5_fh "$digest  $file\n";
-            close( $input_fh );
-        };
 
-        if ( $@ ) {
-            log_msg(" $@\n");
-            halt(\$expt_dir, 2);
-        }
-    }
-}
+#sub generate_md5sum {
+    ## TODO:
+    ## <<<< Stopping Point >>>>
+    ## Can I multithread this to make it a little faster for these bigger S5 runs?
+    ##__exit__(__LINE__, '<<<<  STOPPING POINT >>>>');
+	#my $filelist = shift;
+    ##dd $filelist;
+    ##exit;
+    #my $md5_list = 'md5sum.txt';
+    #open(my $md5_fh, ">>", $md5_list);
+    #my $fork = new Parallel::ForkManager(24);
+    #foreach (@$filelist) {
+        ##next if -l $_;
+        #$fork->start and next;
+        #my $val = `md5sum $_`;
+        #print {$md5_fh} $val;
+        #$fork->finish;
+        ##eval {
+            ##open( my $input_fh, "<", $file ) || die "Can't open the input file '$file': $!";
+            ##binmode( $input_fh );
+            ##my $ctx = Digest::MD5->new;
+            ##$ctx->addfile( *$input_fh );
+            ##my $digest = $ctx->hexdigest;
+            ##print $md5_fh "$digest  $file\n";
+            ##close( $input_fh );
+        ##};
+
+        ##if ( $@ ) {
+            ##log_msg(" $@\n");
+            ##halt(\$expt_dir, 2);
+        ##}
+    #}
+    #$fork->wait_all_children;
+#}
 
 sub create_archive_dir {
     #Create an archive directory with a case name for pooling all clinical data together
@@ -871,9 +972,10 @@ glob
 }
 
 sub __exit__ {
-    my $line = shift;
+    my ($line, $msg)  = @_;
     # Dev exit code just to help with figuring out where I am. 
     # TODO: Remove this prior to launch.
     print "Got exit signal at line: $line\n";
+    print $msg if $msg;
     exit;
 }
