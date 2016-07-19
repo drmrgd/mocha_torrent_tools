@@ -47,7 +47,7 @@ print colored('*'x75, 'bold yellow on_black');
 print "\n\n";
 
 my $scriptname = basename($0);
-my $version = "v4.8.4_071916-dev";
+my $version = "v4.8.5_071916-dev";
 my $description = <<"EOT";
 Program to grab data from an Ion Torrent Run and either archive it, or create a directory that can be imported 
 to another analysis computer for processing.  
@@ -293,40 +293,27 @@ sub gen_filelist {
     my @pgm_file_list = qw{
         basecaller_results/datasets_basecaller.json
         basecaller_results/datasets_pipeline.json
+        Bead_density_raw.png
+        Bead_density_200.png
+        Bead_density_70.png
+        Bead_density_20.png
+        Bead_density_1000.png
+        Bead_density_contour.png
         sigproc_results/1.wells
         sigproc_results/analysis.bfmask.bin
         sigproc_results/bfmask.bin
         sigproc_results/analysis.bfmask.stats
         sigproc_results/bfmask.stats
         sigproc_results/analysis_return_code.txt
-        sigproc_results/Bead_density_raw.png
-        sigproc_results/Bead_density_200.png
-        sigproc_results/Bead_density_70.png
-        sigproc_results/Bead_density_20.png
-        sigproc_results/Bead_density_1000.png
-        sigproc_results/Bead_density_contour.png
         sigproc_results/avgNukeTrace_ATCG.txt
         sigproc_results/avgNukeTrace_TCAG.txt
     };
-
-    # NOTE: Instead of just adding specific plugins, why not take them all and then later just make sure we have the
-    # bare minimum ones we want.
-    # Get listing of plugin results to compare; have to deal with random numbered dirs now
-    #my @wanted_plugins = qw( variantCaller_out 
-                             #varCollector_out 
-                             #AmpliconCoverageAnalysis_out 
-                             #coverageAnalysis_out
-                           #);
-    #for my $plugin_data (@plugin_results) {
-        #push( @$archivelist, "plugin_out/$plugin_data" ) if grep { $plugin_data =~ /$_/ } @wanted_plugins;
-    #}
 
     # Load up the plugins results and start to generate the master file manifest.
     our @found_files;
     sub wanted {
         return if -d;
         push(@found_files, $File::Find::name);
-        #print "$File::Find::name\n";
     }
     find(\&wanted, 'plugin_out');
     my @plugin_results = @found_files;
@@ -341,20 +328,12 @@ sub gen_filelist {
         }
         @file_manifest = (@common_list, @plugin_results, @found_files);
     } else {
-        @file_manifest = (@common_list, @pgm_file_list, @plugin_results);
+        @file_manifest = (@common_list, @plugin_results, @pgm_file_list);
     }
 
-    dd \@file_manifest;
-    __exit__();
-
     my $package_intact = check_data_package(\@file_manifest, $ts_version, $platform);
-    #my $package_intact = check_data_package($final_filelist, $ts_version, $platform);
     ($package_intact) ?  log_msg(" All data located. Proceeding with archive creation\n") : halt(\$expt_dir, 1);
 
-    # XXX
-    #dd $final_filelist;
-    __exit__();
-    #return $final_filelist;
     return \@file_manifest;
 }
 
@@ -366,7 +345,6 @@ sub check_data_package {
     # First let's just check the regular files that we must always have.
     for my $file (@$archivelist) {
         next if $file =~ /^plugin_out/;
-        #die "$err Can't find file '$file'!!\n" unless (grep {-e} glob $file);
         die "$err Can't find file '$file'!!\n" unless (grep {-e} $file);
     }
 
@@ -412,11 +390,11 @@ sub data_archive {
     my $bam_files = get_bams();
     push(@$archivelist, $bam_files);
 
-    if ( DEBUG_OUTPUT ) {
-        print "\n==============  DEBUG  ===============\n";
-        dd $archivelist;
-        print "======================================\n\n";
-    }
+    #if ( DEBUG_OUTPUT ) {
+        #print "\n==============  DEBUG  ===============\n";
+        #dd $archivelist;
+        #print "======================================\n\n";
+    #}
 
     # Run the archive subs
     # TODO:
@@ -528,7 +506,7 @@ sub get_bams {
     if ( -e $tarfile ) { 
         log_msg(" $info tar archive already exists, checking for completeness.\n");
         if (check_tar($tarfile,\@wanted_bams)) {
-            log_msg(" \tTar archive appears to contain all the necessary files and is intact.  Using that file instead of creating new.\n");
+            log_msg(" \tTar archive appears to contain all the necessary files and is intact. Using that file.\n");
             return $tarfile;
         } else {
             log_msg(" \tThe original tar archive is not suitable for use, making a new one.\n");
@@ -592,14 +570,12 @@ sub sys_cmd {
 }
 
 sub create_archive {
-	my $filelist = shift;
-	my $archivename = shift;
+    my ($filelist, $archivename) = @_;
     
     # Create a archive subdirectory to put all data in.
     my $archive_dir;
     if ( $case_num ) {
-        #$archive_dir = create_archive_dir( \$case_num, \$destination_dir);
-        $archive_dir = create_archive_dir( \$case_num, \$outdir_path);
+        $archive_dir = create_archive_dir(\$case_num, \$outdir_path);
     } else {
         $archive_dir = $outdir_path;
     }
@@ -613,15 +589,14 @@ sub create_archive {
     # it's only one directory and actually the files will be separate.  Maybe I should expand the list when 
     # I'm creating the archivelist?
 	log_msg(" Creating an md5sum list for all archive files.\n");
-
 	if ( -e 'md5sum.txt' ) {
 		log_msg(" $info md5sum.txt file already exists in this directory. Creating fresh list.\n");
 		unlink( 'md5sum.txt' );
 	}
-	process_md5_files( $filelist );
+	generate_md5sum( $filelist );
 	push( @$filelist, 'md5sum.txt' );
     # XXX
-    __exit__();
+    __exit__(__LINE__);
 
 	log_msg(" Creating a tarball archive of $archivename.\n");
     # TODO: alter this system call to use new subroutine.
@@ -761,47 +736,27 @@ sub halt {
 	exit 1;
 }
 
-sub process_md5_files {
-	# Pass files into the md5sum function.  As md5sums can only be calc on files, will recursively process
-	# all files within a list.
+sub generate_md5sum {
 	my $filelist = shift;
-	
-	foreach my $file ( @$filelist ) {
-        # Skip symlinked files
-		if ( -l $file ) {
-			next;
-		}
-		if ( -d $file ) {
-			opendir( my $dir_handle, $file ) || die "Can't open the dir '$file': $!";
-			my @dirlist = sort( grep { !/^\.|\.\.}$/ } readdir( $dir_handle) );
-			my @recurs_files = map { $file ."/". $_ } @dirlist;
-			process_md5_files( \@recurs_files );
-		} else {
-			md5sum( $file );
-		}
-	}
-}
+    my $md5_list = 'md5sum.txt';
+    open(my $md5_fh, ">>", $md5_list);
+    for my $file (@$filelist) {
+        next if -l $file;
+        eval {
+            open( my $input_fh, "<", $file ) || die "Can't open the input file '$file': $!";
+            binmode( $input_fh );
+            my $ctx = Digest::MD5->new;
+            $ctx->addfile( *$input_fh );
+            my $digest = $ctx->hexdigest;
+            print $md5_fh "$digest  $file\n";
+            close( $input_fh );
+        };
 
-sub md5sum {
-	# Generate an md5sum for a file and write to a textfile
-	my $file = shift;
-
-	my $md5_list = "md5sum.txt";
-	open( my $md5_fh, ">>", $md5_list ) || die "Can't open the md5sum.txt file for writing: $!";
-	eval {
-		open( my $input_fh, "<", $file ) || die "Can't open the input file '$file': $!";
-		binmode( $input_fh );
-		my $ctx = Digest::MD5->new;
-		$ctx->addfile( *$input_fh );
-		my $digest = $ctx->hexdigest;
-		print $md5_fh "$digest  $file\n";
-		close( $input_fh );
-	};
-
-	if ( $@ ) {
-		log_msg(" $@\n");
-        halt(\$expt_dir, 2);
-	}
+        if ( $@ ) {
+            log_msg(" $@\n");
+            halt(\$expt_dir, 2);
+        }
+    }
 }
 
 sub create_archive_dir {
@@ -916,8 +871,9 @@ glob
 }
 
 sub __exit__ {
+    my $line = shift;
     # Dev exit code just to help with figuring out where I am. 
     # TODO: Remove this prior to launch.
-    print "Got exit signal at line: " . __LINE__ . "\n";
+    print "Got exit signal at line: $line\n";
     exit;
 }
