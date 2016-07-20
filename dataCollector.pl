@@ -49,7 +49,7 @@ print colored('*'x75, 'bold yellow on_black');
 print "\n\n";
 
 my $scriptname = basename($0);
-my $version = "v4.8.6_071916-dev";
+my $version = "v4.8.7_072016-dev";
 my $description = <<"EOT";
 Program to grab data from an Ion Torrent Run and either archive it, or create a directory that can be imported 
 to another analysis computer for processing.  
@@ -126,6 +126,10 @@ my $space = ' ' x ( length( timestamp('timestamp') ) + 3 );
 my $warn =  colored("WARN:", 'bold yellow on_black');
 my $info =  colored("INFO:", 'bold green on_black');
 my $err =   colored("ERROR:", 'bold red on_black');
+#my $debug = colored('DEBUG:', 'bold blue on_white');
+#my $note  = colored('NOTE:', 'bold green on_white');
+my $debug = colored('DEBUG:', 'bold white on_magenta');
+my $note  = colored('NOTE:', 'bold white on_magenta');
 
 # Make sure that there is an appropriate results directory sent to script
 my $resultsDir = shift @ARGV;
@@ -551,7 +555,8 @@ sub sys_cmd {
     my $system_call = shift;
     my $rc;
 
-    print "DEBUG: Executing the following system call:\n\t$$system_call\n" if DEBUG_OUTPUT;
+    #print "DEBUG: Executing the following system call:\n\t$$system_call\n" if DEBUG_OUTPUT;
+    print "$debug Executing the following system call:\n\t$$system_call\n" if DEBUG_OUTPUT;
     system($$system_call);
 
     if ($? == -1) {
@@ -571,42 +576,7 @@ sub sys_cmd {
     return 0;
 }
 
-sub generate_md5sum_threaded {
-    use threads;
-    my $filelist = shift;
-    my @threads;
-    foreach (@$filelist) {
-        next if -l $_;
-        push(@threads, threads->new(\&calc_md5sum, $_));
-    }
-    foreach(@threads) {
-        $_->join();
-    }
-
-    sub calc_md5sum {
-        my $file = shift;
-        open( my $out_fh, ">>", 'md5sum.txt');
-        #print "Processing $file...\n";
-        eval {
-            open(my $input_fh, "<", $file);
-            binmode($input_fh);
-            my $ctx = Digest::MD5->new;
-            $ctx->addfile(*$input_fh);
-            my $digest = $ctx->hexdigest;
-            print $out_fh "$digest  $file\n";
-            close $input_fh;
-        };
-        #my $val = `md5sum $file`;
-        #print {$out_fh} $val;
-
-        if ( $@ ) {
-            log_msg(" $@\n");
-            halt(\$expt_dir, 2);
-        }
-    }
-}
-
-sub generate_md5sum_forked {
+sub generate_md5sum {
     # TODO:
     # <<<< Stopping Point >>>>
     # This is the way forward.  Using forks is muhc, much less memory consumptive than using threaeds,
@@ -620,27 +590,29 @@ sub generate_md5sum_forked {
     #   5.  do I need to (should i?) skip the symlinked files?
     #   6.  Shoudl I use tghe system md5sum or use the Perl module?
     # Can I multithread this to make it a little faster for these bigger S5 runs?
-    __exit__(__LINE__, '<<<<  STOPPING POINT >>>>');
+    #__exit__(__LINE__, '<<<<  STOPPING POINT >>>>');
 	my $filelist = shift;
     #dd $filelist;
     #exit;
     my $md5_list = 'md5sum.txt';
     open(my $md5_fh, ">>", $md5_list);
-    #my $fork = new Parallel::ForkManager(24);
-    my $fork = new Parallel::ForkManager(128);
+    my $num_procs = 48;
+    print "\t$note Process queue is ===> $num_procs\n";
+    my $fork = new Parallel::ForkManager($num_procs);
+
     foreach (@$filelist) {
         next if -l $_;
         $fork->start and next;
         eval {
-            #my $val = `md5sum $_`;
-            #print {$md5_fh} $val;
-            open(my $input_fh, "<", $_);
-            binmode($input_fh);
-            my $ctx = Digest::MD5->new;
-            $ctx->addfile(*$input_fh);
-            my $digest = $ctx->hexdigest;
-            print {$md5_fh} "$digest  $_\n";
-            close $input_fh;
+            my $val = qx(md5sum $_);
+            print {$md5_fh} $val;
+            #open(my $input_fh, "<", $_);
+            #binmode($input_fh);
+            #my $ctx = Digest::MD5->new;
+            #$ctx->addfile(*$input_fh);
+            #my $digest = $ctx->hexdigest;
+            #print {$md5_fh} "$digest  $_\n";
+            #close $input_fh;
         };
 
         if ( $@ ) {
@@ -676,13 +648,12 @@ sub create_archive {
 		log_msg(" $info md5sum.txt file already exists in this directory. Creating fresh list.\n");
 		unlink( 'md5sum.txt' );
 	}
-    # NOTE: This is calculating all files, but some are symlinks and we'd prefer to skip those.  How to compute
-    #       without symlinks?
-    printf "calculating MD5Sum for %s files\n", scalar(@$filelist);
-    #generate_md5sum( $filelist );
-    #generate_md5sum_threaded( $filelist );
-    generate_md5sum_forked( $filelist );
-	push( @$filelist, 'md5sum.txt' );
+
+    my $total_files = grep{ ! -l $_ } @$filelist;
+    print "$note Calculating MD5Sum for $total_files files\n";
+
+    generate_md5sum($filelist);
+	push(@$filelist, 'md5sum.txt');
     # XXX
     __exit__(__LINE__);
 
