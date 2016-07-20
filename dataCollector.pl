@@ -49,7 +49,7 @@ print colored('*'x75, 'bold yellow on_black');
 print "\n\n";
 
 my $scriptname = basename($0);
-my $version = "v4.8.7_072016-dev";
+my $version = "v4.8.8_072016-dev";
 my $description = <<"EOT";
 Program to grab data from an Ion Torrent Run and either archive it, or create a directory that can be imported 
 to another analysis computer for processing.  
@@ -197,7 +197,7 @@ log_msg(" $info Running in R&D mode.\n") if $r_and_d;
 
 if ( DEBUG_OUTPUT ) {
     no warnings;
-    print "\n==============  DEBUG  ===============\n";
+    print "\n==============  $debug ===============\n";
     print "Options input into script:\n";
     print "\tExpt Dir     =>  $resultsDir\n";
     print "\tUser         =>  $ENV{'USER'}\n";
@@ -218,7 +218,7 @@ if ( DEBUG_OUTPUT ) {
 
 # Stage the intial components of either an extraction or archive.
 chdir $expt_dir || die "Can not access the results directory '$expt_dir': $!";
-print "$info Current working directory is: " . getcwd() . "\n" if DEBUG_OUTPUT;
+print "$debug Current working directory is: " . getcwd() . "\n" if DEBUG_OUTPUT;
 
 # Generate a sampleKey.txt file
 # In this version (v5.0+) we need to use a different file for the sampleKeyGen script, but need to keep old
@@ -396,12 +396,6 @@ sub data_archive {
     my $bam_files = get_bams();
     push(@$archivelist, $bam_files);
 
-    #if ( DEBUG_OUTPUT ) {
-        #print "\n==============  DEBUG  ===============\n";
-        #dd $archivelist;
-        #print "======================================\n\n";
-    #}
-
     # Run the archive subs
     # TODO:
     my ($status, $md5sum, $archive_dir) = create_archive( $archivelist, $archive_name );
@@ -555,8 +549,7 @@ sub sys_cmd {
     my $system_call = shift;
     my $rc;
 
-    #print "DEBUG: Executing the following system call:\n\t$$system_call\n" if DEBUG_OUTPUT;
-    print "$debug Executing the following system call:\n\t$$system_call\n" if DEBUG_OUTPUT;
+    print "\t$debug Executing the following system call:\n\t$$system_call\n" if DEBUG_OUTPUT;
     system($$system_call);
 
     if ($? == -1) {
@@ -577,46 +570,31 @@ sub sys_cmd {
 }
 
 sub generate_md5sum {
-    # TODO:
-    # <<<< Stopping Point >>>>
-    # This is the way forward.  Using forks is muhc, much less memory consumptive than using threaeds,
-    # and even though we'll have to install the module, I think this is the clear winner.  Have to keep
-    # working on refining:
-    #   1.  How many processes to run?  128 is OK, but maybe 64 is better to not hog too many resources.  seeing 
-    #       some I/O problems due to too many 'D' statuses.  Reduce to maybe 64 or less?
-    #   2.  can I verify the MD5sum file is working OK?
-    #   3.  Remove the threading call and clean up.
-    #   4.  Get a better calculator for the total number of files to process
-    #   5.  do I need to (should i?) skip the symlinked files?
-    #   6.  Shoudl I use tghe system md5sum or use the Perl module?
-    # Can I multithread this to make it a little faster for these bigger S5 runs?
-    #__exit__(__LINE__, '<<<<  STOPPING POINT >>>>');
 	my $filelist = shift;
-    #dd $filelist;
-    #exit;
     my $md5_list = 'md5sum.txt';
     open(my $md5_fh, ">>", $md5_list);
     my $num_procs = 48;
-    print "\t$note Process queue is ===> $num_procs\n";
+    print "\t$note Process queue is ===> $num_procs\n" if DEBUG_OUTPUT;
+
     my $fork = new Parallel::ForkManager($num_procs);
+    my $parent_pid = $$;
 
     foreach (@$filelist) {
         next if -l $_;
         $fork->start and next;
         eval {
-            my $val = qx(md5sum $_);
-            print {$md5_fh} $val;
-            #open(my $input_fh, "<", $_);
-            #binmode($input_fh);
-            #my $ctx = Digest::MD5->new;
-            #$ctx->addfile(*$input_fh);
-            #my $digest = $ctx->hexdigest;
-            #print {$md5_fh} "$digest  $_\n";
-            #close $input_fh;
+            open(my $input_fh, "<", $_);
+            binmode($input_fh);
+            my $ctx = Digest::MD5->new;
+            $ctx->addfile(*$input_fh);
+            my $digest = $ctx->hexdigest;
+            print {$md5_fh} "$digest  $_\n";
+            close $input_fh;
         };
 
         if ( $@ ) {
             log_msg(" $@\n");
+            kill 9, $parent_pid;
             halt(\$expt_dir, 2);
         }
         $fork->finish;
@@ -636,13 +614,6 @@ sub create_archive {
     }
 
 	# Create a checksum file for all of the files in the archive and add it to the tarball 
-    # TODO: Can i optimize this at all?  
-    #
-    # <<<  STOPPING POINT >>>
-    # This needs to be reworked so that it'll work with the new directory struction.  If we have an S5 run,
-    # then we need to consider that sigproc_results will be several directories.  If it's a PGM run, then 
-    # it's only one directory and actually the files will be separate.  Maybe I should expand the list when 
-    # I'm creating the archivelist?
 	log_msg(" Creating an md5sum list for all archive files.\n");
 	if ( -e 'md5sum.txt' ) {
 		log_msg(" $info md5sum.txt file already exists in this directory. Creating fresh list.\n");
@@ -659,6 +630,7 @@ sub create_archive {
 
 	log_msg(" Creating a tarball archive of $archivename.\n");
     # TODO: alter this system call to use new subroutine.
+    #       2.  Test to see if there's much difference between tarball and just tarfile.
     if ( system( "tar cfz $archivename @$filelist" ) != 0 ) {
 		log_msg(" $err Tarball creation failed: $!.\n");
         #printf "child died with signal %d, %s coredump\n", 
@@ -716,17 +688,17 @@ sub create_archive {
 	my $init_tarball_md5 = Digest::MD5->new->addfile($pre_fh)->hexdigest;
 	close( $pre_fh );
     if (DEBUG_OUTPUT) {
-        print "\n==============  DEBUG  ===============\n";
+        print "\n==============  $debug  ===============\n";
         print "\tMD5 Hash = " . $init_tarball_md5 . "\n"; 
-        print "======================================\n\n";
+        print "========================================\n\n";
     }
 	log_msg(" Copying archive tarball to '$archive_dir'.\n");
 	
     if ( DEBUG_OUTPUT ) {
-        print "\n==============  DEBUG  ===============\n";
+        print "\n==============  $debug  ===============\n";
         print "\tpwd: $expt_dir\n";
         print "\tpath: $archive_dir\n";
-        print "======================================\n\n";
+        print "========================================\n\n";
     }
 
 	if ( copy( $archivename, $archive_dir ) == 0 ) {
@@ -746,9 +718,9 @@ sub create_archive {
 	close( $post_fh );
 	
     if (DEBUG_OUTPUT) {
-        print "\n==============  DEBUG  ===============\n";
+        print "\n==============  $debug  ===============\n";
         print "\tMD5 Hash = " . $post_tarball_md5 . "\n"; 
-        print "======================================\n\n";
+        print "========================================\n\n";
     }
 
 	log_msg(" Comparing the MD5 hash value for local and fileshare copies of archive.\n");
@@ -837,10 +809,10 @@ sub create_archive_dir {
     my $path = shift;
 
     if ( DEBUG_OUTPUT ) {
-        print "\n==============  DEBUG  ===============\n";
+        print "\n==============  $debug  ===============\n";
         print "\tCase No: $$case\n";
         print "\tPath: $$path\n";
-        print "======================================\n\n";
+        print "========================================\n\n";
     }
 
     log_msg(" $info No case number assigned for this archive.\n") unless $$case; 
@@ -946,7 +918,7 @@ sub __exit__ {
     my ($line, $msg)  = @_;
     # Dev exit code just to help with figuring out where I am. 
     # TODO: Remove this prior to launch.
-    print "Got exit signal at line: $line\n";
+    print colored("Got exit signal at line: $line", 'BOLD white on_green');
     print $msg if $msg;
     exit;
 }
