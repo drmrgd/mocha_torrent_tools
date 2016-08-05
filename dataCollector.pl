@@ -49,7 +49,7 @@ print colored('*'x75, 'bold yellow on_black');
 print "\n\n";
 
 my $scriptname = basename($0);
-my $version = "v4.8.8_072016-dev";
+my $version = "v4.0.0_080516-dev";
 my $description = <<"EOT";
 Program to grab data from an Ion Torrent Run and either archive it, or create a directory that can be imported 
 to another analysis computer for processing.  
@@ -267,9 +267,8 @@ elsif ($archive) {
 
 sub gen_filelist {
     # output a file manifest depending on the type of server (PGM or S5) and the software version.
-    # For S5 exportation, need the whole sigproc_results directory with the 96 blocks (~135GB), and have to put that 
-    # into an 'onboard_results' directory for processing.  Then add in the normal directoories and files in the root 
-    # directory.
+    # For S5 exportation, need the whole sigproc_results directory with the 96 blocks (~135GB) in order to do a whole
+    # reanalysis like on PGM.  Not feasible, so skip that and just keep the BAM files.
 
     my ($platform,$version) = @_;
     
@@ -278,6 +277,7 @@ sub gen_filelist {
         drmaa_stdout.txt
         explog_final.txt
         explog.txt
+        expMeta.dat
         pgm_logs.zip
         ion_params_00.json 
         report.pdf
@@ -285,14 +285,8 @@ sub gen_filelist {
         sysinfo.txt
         InitLog.txt
         sampleKey.txt
-        );
-
-    # Only available on S5
-    my @s5_file_list = qw(
         basecaller_results/BaseCaller.json
-        expMeta.dat
         serialized*json
-        sigproc_results/
         );
 
     # Only available on PGM
@@ -321,20 +315,23 @@ sub gen_filelist {
         return if -d;
         push(@found_files, $File::Find::name);
     }
+
+    # Find globbed plugin out files and load up array.
     find(\&wanted, 'plugin_out');
     my @plugin_results = @found_files;
 
+    # Reset found_files array and get common globbed files.
+    @found_files = ();
+    for my $elem (@common_list) {
+        find(\&wanted, glob $elem);
+    }
 
     # Add platform specific files to the manifest.
     my @file_manifest;
-    if ($$platform eq 'S5') {
-        @found_files = ();
-        for my $elem (@s5_file_list) {
-            find(\&wanted, glob $elem);
-        }
-        @file_manifest = (@common_list, @plugin_results, @found_files);
+    if ($$platform eq 'PGM') {
+        @file_manifest = (@found_files, @plugin_results, @pgm_file_list);
     } else {
-        @file_manifest = (@common_list, @plugin_results, @pgm_file_list);
+        @file_manifest = (@found_files, @plugin_results);
     }
 
     my $package_intact = check_data_package(\@file_manifest, $ts_version, $platform);
