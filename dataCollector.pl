@@ -17,7 +17,6 @@
 use warnings;
 use strict;
 use version;
-use threads;
 use autodie;
 
 use File::Basename;
@@ -49,7 +48,7 @@ print colored('*'x75, 'bold yellow on_black');
 print "\n\n";
 
 my $scriptname = basename($0);
-my $version = "v4.0.0_080516-dev";
+my $version = "v4.9.1_080516-dev";
 my $description = <<"EOT";
 Program to grab data from an Ion Torrent Run and either archive it, or create a directory that can be imported 
 to another analysis computer for processing.  
@@ -126,8 +125,6 @@ my $space = ' ' x ( length( timestamp('timestamp') ) + 3 );
 my $warn =  colored("WARN:", 'bold yellow on_black');
 my $info =  colored("INFO:", 'bold green on_black');
 my $err =   colored("ERROR:", 'bold red on_black');
-#my $debug = colored('DEBUG:', 'bold blue on_white');
-#my $note  = colored('NOTE:', 'bold green on_white');
 my $debug = colored('DEBUG:', 'bold white on_magenta');
 my $note  = colored('NOTE:', 'bold white on_magenta');
 
@@ -223,7 +220,7 @@ print "$debug Current working directory is: " . getcwd() . "\n" if DEBUG_OUTPUT;
 # Generate a sampleKey.txt file
 # In this version (v5.0+) we need to use a different file for the sampleKeyGen script, but need to keep old
 # functionality until we fully upgrade the systems.  So, generate the version specific sampleKey.txt here.
-my $ts_version = version_check();
+my ($ts_version,$host) = version_check();
 my $old_version = version->parse('4.4.2');
 my $curr_version = version->parse($ts_version);
 
@@ -233,6 +230,15 @@ if ($curr_version > $old_version) {
 } else {
     log_msg(" $info An older version ($ts_version) was detected. Using sampleKeyGen call\n");
     sample_key_gen('old');
+}
+
+if ($server_type eq 'PGM' && $host =~ /S5XL/) {
+    log_msg(" $err Option 'server' set to PGM, but run appears to be from S5 system!\n");
+    halt( \$expt_dir, 8 );
+}
+elsif ($server_type eq 'S5' && $host !~ /S5XL/) {
+    log_msg(" $err Option 'server' set to S5, but run appears to be from PGM system!\n");
+    halt( \$expt_dir, 6 );
 }
 
 # Check to see if there is a 'explog_final.txt' file in cwd or try to get one from the pgm_logs.zip
@@ -667,6 +673,7 @@ sub halt {
         3  => "archive package or tarball creation failure",
         4  => "unspecified error",
         5  => "general system error",
+        6  => "settings error",
     );
     my $error = colored($fail_codes{$code}, 'bold red on_black');
 
@@ -771,12 +778,12 @@ sub generate_md5sum {
 sub version_check {
     # Find out what TS version running in order to customize some downstream functions
     log_msg(" $info Checking TSS version for file path info...\n");
-    
     open( my $ver_fh, "<", "version.txt" ) || die "$err can not open the version.txt file for reading: $!";
-    (my $ts_version) = map { /Torrent_Suite=(.*)/ } <$ver_fh>;
-    log_msg("\tTSS version is '$ts_version'\n");
+    my %metadata = map{ chomp; split(/=/) } <$ver_fh>;
     close $ver_fh;
-    return $ts_version;
+
+    log_msg("\tTSS version is '$metadata{'Torrent_Suite'}' running on host '$metadata{'host'}'\n");
+    return $metadata{'Torrent_Suite'}, $metadata{'host'};
 }
 
 sub sample_key_gen {
