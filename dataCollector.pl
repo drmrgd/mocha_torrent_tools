@@ -48,7 +48,7 @@ print colored('*'x75, 'bold yellow on_black');
 print "\n\n";
 
 my $scriptname = basename($0);
-my $version = "v4.9.2_080816-dev";
+my $version = "v4.9.3_080816-dev";
 my $description = <<"EOT";
 Program to grab data from an Ion Torrent Run and either archive it, or create a directory that can be imported 
 to another analysis computer for processing.  
@@ -398,7 +398,7 @@ sub check_data_package {
 sub data_archive {
     # Run full archive on data.
     my $archivelist = shift;
-    my $archive_name = "$output.tar.gz";
+    my $archive_name = "$output.tar";
 
     # Collect BAM files for the archive
     my $bam_files = get_bams();
@@ -406,60 +406,62 @@ sub data_archive {
 
     # Run the archive subs
     # TODO:
-    my ($status, $md5sum, $archive_dir) = create_archive( $archivelist, $archive_name );
-    __exit__(__LINE__);
+    my $archive_dir = create_archive( $archivelist, $archive_name );
 
-    if ( $status == 1 ) {
-        log_msg(" Archival of experiment '$output' completed successfully\n\n");
-        print "Experiment archive completed successfully\n" if $quiet;
-        send_mail( "success", \$case_num, \$archive_dir, \$md5sum, \$expt_type );
-    } else {
-        log_msg(" $err Archive creation failed for '$output'.  Check " . LOG_OUT . " for details\n\n");
-        print "$err Archive creation failed for '$output'. Check " . LOG_OUT . " for details\n\n" if $quiet;
-        halt(\$expt_dir, 4);
-    }
+    #now that we created the archive, we need to move the archive.
+    # TODO: need to get dest dir here!
+    my $md5sum = copy_tarfile( \$archive_name, \$archive_dir);
 
-    # TODO:  For better encapsulation.  should move the code not responsible for actual archive creation back to
-    # this sub.  
-    #
+    __exit__(__LINE__, "\n<<< STOPPING POINT >>>\nChecking and optimizing copy operation\n");
+    exit;
 
-=cut
-	# Get md5sum for tarball prior to moving.
-	log_msg(" Getting MD5 hash for tarball prior to copying.\n");
-	open( my $pre_fh, "<", $archivename ) || die "Can't open the archive tarball for reading: $!";
-	binmode( $pre_fh );
-	my $init_tarball_md5 = Digest::MD5->new->addfile($pre_fh)->hexdigest;
-	close( $pre_fh );
+
+    #if ( $status == 1 ) {
+        #log_msg(" Archival of experiment '$output' completed successfully\n\n");
+        #print "Experiment archive completed successfully\n" if $quiet;
+        #send_mail( "success", \$case_num, \$archive_dir, \$md5sum, \$expt_type );
+    #} else {
+        #log_msg(" $err Archive creation failed for '$output'.  Check " . LOG_OUT . " for details\n\n");
+        #print "$err Archive creation failed for '$output'. Check " . LOG_OUT . " for details\n\n" if $quiet;
+        #halt(\$expt_dir, 4);
+    #}
+
+}
+
+sub copy_tarfile {
+    # Get an initial MD5sum of the tar file, copy it to final location, check integrity, and cleanup.
+    my ($archivename, $archive_dir) = @_;
+
+    # Get md5sum for tarball prior to moving.
+	log_msg(" Getting MD5 hash for tarfile prior to copying.\n");
+    my $init_tarball_md5 = tarball_md5sum($archivename);
+    
     if (DEBUG_OUTPUT) {
         print "\n==============  $debug  ===============\n";
         print "\tMD5 Hash = " . $init_tarball_md5 . "\n"; 
         print "========================================\n\n";
     }
-	log_msg(" Copying archive tarball to '$archive_dir'.\n");
+	log_msg(" Copying archive tarball to '$$archive_dir'.\n");
 	
     if ( DEBUG_OUTPUT ) {
         print "\n==============  $debug  ===============\n";
         print "\tpwd: $expt_dir\n";
-        print "\tpath: $archive_dir\n";
+        print "\tpath: $$archive_dir\n";
         print "========================================\n\n";
     }
 
-	if ( copy( $archivename, $archive_dir ) == 0 ) {
-		log_msg(" Copying archive to storage device: $!.\n");
-		return 0;
+	if ( copy( $$archivename, $$archive_dir ) == 0 ) {
+		log_msg(" $err Copying archive to storage device: $!.\n");
+        halt( \$expt_dir, 7 ); 
 	} else {
 		log_msg(" $info Archive successfully copied to archive storage device.\n");
 	}
 
 	# check integrity of the tarball
 	log_msg(" Calculating MD5 hash for copied archive.\n");
-    my $moved_archive = "$archive_dir/$archivename";
+    my $moved_archive = "$$archive_dir/$$archivename";
+    my $post_tarball_md5 = tarball_md5sum(\$moved_archive);
 
-	open( my $post_fh, "<", $moved_archive ) || die "Can't open the archive tarball for reading: $!";
-	binmode( $post_fh );
-	my $post_tarball_md5 = Digest::MD5->new->addfile($post_fh)->hexdigest;
-	close( $post_fh );
-	
     if (DEBUG_OUTPUT) {
         print "\n==============  $debug  ===============\n";
         print "\tMD5 Hash = " . $post_tarball_md5 . "\n"; 
@@ -469,21 +471,15 @@ sub data_archive {
 	log_msg(" Comparing the MD5 hash value for local and fileshare copies of archive.\n");
 	if ( $init_tarball_md5 ne $post_tarball_md5 ) {
 		log_msg(" $err The md5sum for the archive does not agree after moving to the storage location. Retry the transfer manually\n");
-		return 0;
+        halt( \$expt_dir, 2 );
 	} else {
 		log_msg(" $info The md5sum for the archive is in agreement. The local copy will now be deleted.\n");
-		unlink( $archivename );
+		unlink( $$archivename );
 	}
-    return (1, $post_tarball_md5, $archive_dir);
-
-
-
-=cut
+    return $post_tarball_md5;
 }
 
-
-
-sub check_tar {
+sub check_bam_tarfile {
     # Check to see if we need to generate a new tar archive of the BAM files or we can use what we already have.
     my ($tar_file, $bam_list) = @_;
 
@@ -495,6 +491,15 @@ sub check_tar {
         $counter{$element}++;
     }
     (grep { $_ == 1 } values %counter) ? return 0 : return 1;
+}
+
+sub tarball_md5sum {
+    my $tarfile = shift;
+	open( my $pre_fh, "<", $$tarfile);
+	binmode( $pre_fh );
+	my $md5val = Digest::MD5->new->addfile($pre_fh)->hexdigest;
+	close( $pre_fh );
+    return $md5val;
 }
 
 sub create_archive {
@@ -529,7 +534,6 @@ sub create_archive {
     print {$tar_fh} "$_\n" for @final_file_list;
     close $tar_fh;
     
-    $archivename =~ s/\.gz$//;
     if ( sys_cmd(\"tar -c -T 'tar_filelist.list' -f $archivename") != 0 ) {
 		log_msg(" $err Tarball creation failed: $!.\n");
         exit;
@@ -573,64 +577,7 @@ sub create_archive {
 		log_msg(" $err An error with the md5sum check was encountered: $?\n");
         halt( \$expt_dir, 2);
 	}
-__exit__(__LINE__, "\n<<< STOPPING POINT >>>\nChecking the md5sum of tar archive\n");
-
-=cut
-
-
-# TODO:  Remove this code
-    # Get md5sum for tarball prior to moving.
-    log_msg(" Getting MD5 hash for tarball prior to copying.\n");
-    open( my $pre_fh, "<", $archivename ) || die "Can't open the archive tarball for reading: $!";
-    binmode( $pre_fh );
-    my $init_tarball_md5 = Digest::MD5->new->addfile($pre_fh)->hexdigest;
-    close( $pre_fh );
-    if (DEBUG_OUTPUT) {
-        print "\n==============  $debug  ===============\n";
-        print "\tMD5 Hash = " . $init_tarball_md5 . "\n"; 
-        print "========================================\n\n";
-    }
-    log_msg(" Copying archive tarball to '$archive_dir'.\n");
-	
-    if ( DEBUG_OUTPUT ) {
-        print "\n==============  $debug  ===============\n";
-        print "\tpwd: $expt_dir\n";
-        print "\tpath: $archive_dir\n";
-        print "========================================\n\n";
-    }
-
-    if ( copy( $archivename, $archive_dir ) == 0 ) {
-        log_msg(" Copying archive to storage device: $!.\n");
-        return 0;
-    } else {
-        log_msg(" $info Archive successfully copied to archive storage device.\n");
-    }
-
-    # check integrity of the tarball
-    log_msg(" Calculating MD5 hash for copied archive.\n");
-    my $moved_archive = "$archive_dir/$archivename";
-
-    open( my $post_fh, "<", $moved_archive ) || die "Can't open the archive tarball for reading: $!";
-    binmode( $post_fh );
-    my $post_tarball_md5 = Digest::MD5->new->addfile($post_fh)->hexdigest;
-    close( $post_fh );
-	
-    if (DEBUG_OUTPUT) {
-        print "\n==============  $debug  ===============\n";
-        print "\tMD5 Hash = " . $post_tarball_md5 . "\n"; 
-        print "========================================\n\n";
-    }
-
-    log_msg(" Comparing the MD5 hash value for local and fileshare copies of archive.\n");
-    if ( $init_tarball_md5 ne $post_tarball_md5 ) {
-        log_msg(" $err The md5sum for the archive does not agree after moving to the storage location. Retry the transfer manually\n");
-        return 0;
-    } else {
-        log_msg(" $info The md5sum for the archive is in agreement. The local copy will now be deleted.\n");
-        unlink( $archivename );
-    }
-    return (1, $post_tarball_md5, $archive_dir);
-=cut
+    return $archive_dir;
 }
 
 sub timestamp {
@@ -659,6 +606,7 @@ sub halt {
         4  => "unspecified error",
         5  => "general system error",
         6  => "settings error",
+        7  => "archive copy error",
     );
     my $error = colored($fail_codes{$code}, 'bold red on_black');
 
@@ -805,7 +753,7 @@ sub get_bams {
     log_msg(" Generating a tar archive of the library BAM files for the package...\n");
     if ( -e $tarfile ) { 
         log_msg(" $info tar archive already exists, checking for completeness.\n");
-        if (check_tar($tarfile,\@wanted_bams)) {
+        if (check_bam_tarfile($tarfile,\@wanted_bams)) {
             log_msg(" \tTar archive appears to contain all the necessary files and is intact. Using that file.\n");
             return $tarfile;
         } else {
@@ -907,9 +855,8 @@ glob
 }
 
 sub __exit__ {
+    # Dev exit code just to help with figuring out where I am as I'm debugging chunks of code. 
     my ($line, $msg)  = @_;
-    # Dev exit code just to help with figuring out where I am. 
-    # TODO: Remove this prior to launch.
     print "\n";
     print colored(">>>>  Got exit signal at line: $line  >>>>", 'BOLD white on_green');
     print "$msg\n" if $msg;
