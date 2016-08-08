@@ -48,7 +48,7 @@ print colored('*'x75, 'bold yellow on_black');
 print "\n\n";
 
 my $scriptname = basename($0);
-my $version = "v4.9.1_080516-dev";
+my $version = "v4.9.2_080816-dev";
 my $description = <<"EOT";
 Program to grab data from an Ion Torrent Run and either archive it, or create a directory that can be imported 
 to another analysis computer for processing.  
@@ -319,7 +319,10 @@ sub gen_filelist {
     our @found_files;
     sub wanted {
         return if -d;
+        #my @filter_strings = qw( scraper flot lifechart bam);
+        #push(@found_files, $File::Find::name) unless grep {$_} @filter_strings;
         push(@found_files, $File::Find::name);
+
     }
 
     # Find globbed plugin out files and load up array.
@@ -343,6 +346,8 @@ sub gen_filelist {
     my $package_intact = check_data_package(\@file_manifest, $ts_version, $platform);
     ($package_intact) ?  log_msg(" All data located. Proceeding with archive creation\n") : halt(\$expt_dir, 1);
 
+    #dd \@file_manifest;
+    #__exit__('348', 'testing file manifest');
     return \@file_manifest;
 }
 
@@ -504,7 +509,6 @@ sub create_archive {
     }
 
 	# Create a checksum file for all of the files in the archive and add it to the tarball 
-    # TODO: To speed up testing, remove this call.  Add back in when in production!
     log_msg(" Creating an md5sum list for all archive files.\n");
     if ( -e 'md5sum.txt' ) {
         log_msg(" $info md5sum.txt file already exists in this directory. Creating fresh list.\n");
@@ -512,35 +516,21 @@ sub create_archive {
     }
 
     # We don't want to archive symlinked files since they probably won't work....i think.  Let's skip those 
-    # for now.
-    #my $total_files = grep{ ! -l $_ } @$filelist;
-    #print "$note Calculating MD5Sum for $total_files files\n";
     my @final_file_list = grep{ ! -l $_ } @$filelist;
     printf "$note Calculating MD5Sum for %s files\n", scalar(@final_file_list);
-
-    # TODO: To speed up testing, remove this call.  Add back in when in production!
     generate_md5sum($filelist);
-	#push(@$filelist, 'md5sum.txt');
-	push(@final_file_list, 'md5sum.txt');
+    push(@final_file_list, 'md5sum.txt');
 
-	log_msg(" Creating a tarball archive of $archivename.\n");
-    # TODO: alter this system call to use new subroutine.
-    #       2.  Test to see if there's much difference between tarball and just tarfile.
-    #if ( system( "tar cfz $archivename @$filelist" ) != 0 ) {
-    #if ( system( "tar cfz $archivename @$filelist" ) != 0 ) {
-    # tar has a limit on how many args we can pass at a time.  Write the filelist to a file and then
-    # pass that list to tar.  Remove the file if it all worked OK.
+    # Instead of a tarball, just create tarfile for easy distribution; the compression isn't very good for the dataset.
+	log_msg(" Creating a tar archive of $archivename.\n");
+    
+    # Since tar has a limit on how many args we can pass at a time, write the filelist to a file and pass that list to tar.  
     open(my $tar_fh, ">", 'tar_filelist.list');
-    #print {$tar_fh} "$_\n" for @$filelist;
     print {$tar_fh} "$_\n" for @final_file_list;
     close $tar_fh;
-    #if ( sys_cmd(\"tar cfz $archivename @$filelist") != 0 ) {
-    #if ( sys_cmd(\"tar -cz -T 'tar_filelist.list' -f $archivename") != 0 ) {
     
-    #$archivename =~ s/\.gz$//;
-    #if ( sys_cmd(\"tar -cv -T 'tar_filelist.list' -f $archivename") != 0 ) {
-    __exit__(__LINE__, '<<< STOPPING POINT >>>\nNeed to figure out faster, better way to create tarball for such a large set.  Look into testing pigz');
-    if ( sys_cmd(\"tar -cvz -T 'tar_filelist.list' -f $archivename") != 0 ) {
+    $archivename =~ s/\.gz$//;
+    if ( sys_cmd(\"tar -c -T 'tar_filelist.list' -f $archivename") != 0 ) {
 		log_msg(" $err Tarball creation failed: $!.\n");
         exit;
         halt( \$expt_dir, 3 );
@@ -548,9 +538,6 @@ sub create_archive {
 		log_msg(" $info Tarball creation was successful.\n");
         unlink('tar_filelist.list');
 	}
-
-    # XXX
-    __exit__(__LINE__);
 
 	# Uncompress archive in /tmp dir and check to see that md5sum matches.
 	my $tmpdir = "/tmp/mocha_archive";
@@ -561,38 +548,36 @@ sub create_archive {
 	mkdir( $tmpdir );
 	
 	log_msg(" Uncompressing tarball in '$tmpdir' for integrity check.\n");
-	#if ( system( "tar xfz $archivename -C $tmpdir" ) != 0 ) {
-	if ( sys_cmd(\"tar xfz $archivename -C $tmpdir") != 0 ) {
+	if ( sys_cmd(\"tar xf $archivename -C $tmpdir") != 0 ) {
 		log_msg(" $err Can not copy tarball to '/tmp'. $?\n");
         halt( \$expt_dir, 3 );
-		#return 0;
 	}
 	
 	# Check md5sum of archive against generated md5sum.txt file
 	chdir( $tmpdir );
     log_msg(" Confirming MD5sum of tarball.\n");
-    #my $md5check = system( "md5sum -c 'md5sum.txt' >/dev/null" );
-	my $return_code = sys_cmd( "md5sum -c 'md5sum.txt' >/dev/null" );
+	my $return_code = sys_cmd( \"md5sum -c 'md5sum.txt' > /dev/null 2>&1" );
+
+    log_msg(" $debug return code for md5sum check is: $return_code\n") if DEBUG_OUTPUT;
+    
     if ($return_code == 0) {
 		log_msg(" The archive is intact and not corrupt\n");
 		chdir($expt_dir) || die "Can't change directory to '$expt_dir': $!";
         log_msg(" Removing the tmp data\n");
 		remove_tree( $tmpdir );
 	} 
-	elsif ( $? == 1 ) {
+	elsif ( $return_code == 1 ) {
 		log_msg(" $err There was a problem with the archive integrity.  Archive creation halted.\n");
-		#chdir( $cwd ) || die "Can't change dir back to '$cwd': $!";
-		chdir($expt_dir) || die "Can't change dir back to '$expt_dir': $!";
-		remove_tree( $tmpdir );
-		return 0;
+        halt( \$expt_dir, 2);
 	} else {
 		log_msg(" $err An error with the md5sum check was encountered: $?\n");
-		#chdir( $cwd ) || die "Can't change dir back to '$cwd': $!";
-		chdir($expt_dir) || die "Can't change dir back to '$expt_dir': $!";
-		remove_tree( $tmpdir );
-		return 0;
+        halt( \$expt_dir, 2);
 	}
+__exit__(__LINE__, "\n<<< STOPPING POINT >>>\nChecking the md5sum of tar archive\n");
+
 =cut
+
+
 # TODO:  Remove this code
     # Get md5sum for tarball prior to moving.
     log_msg(" Getting MD5 hash for tarball prior to copying.\n");
@@ -927,7 +912,7 @@ sub __exit__ {
     # TODO: Remove this prior to launch.
     print "\n";
     print colored(">>>>  Got exit signal at line: $line  >>>>", 'BOLD white on_green');
-    print $msg if $msg;
+    print "$msg\n" if $msg;
     print "\n";
     exit;
 }
