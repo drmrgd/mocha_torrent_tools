@@ -35,6 +35,7 @@ use File::Find;
 use Email::MIME;
 use Email::Sender::Simple qw(sendmail);
 use Parallel::ForkManager;
+use List::Util;
 
 use constant DEBUG_OUTPUT => 1;
 use constant LOG_OUT       => '/results/data_collect_dev/test.log';
@@ -48,7 +49,7 @@ print colored('*'x75, 'bold yellow on_black');
 print "\n\n";
 
 my $scriptname = basename($0);
-my $version = "v4.9.3_080816-dev";
+my $version = "v4.9.4_080816-dev";
 my $description = <<"EOT";
 Program to grab data from an Ion Torrent Run and either archive it, or create a directory that can be imported 
 to another analysis computer for processing.  
@@ -153,6 +154,16 @@ my $expt_dir = abs_path($resultsDir);
 my $outdir_path;
 my $outdir = shift @ARGV || do { print "$err No destination directory input.  You must indicate a destination directory into which we'll put the data!\n\n"; die "$usage\n" };
 (-d $outdir) ? ($outdir_path = abs_path($outdir)) : die "$err Destination directory '$outdir' can not be found!\n";
+
+
+# XXX
+my $case_num = 'demo';
+my $archive_dir = $outdir_path;
+my $md5sum = 'some_hash_val';
+my $expt_type = 'general';
+send_mail( "success", \$case_num, \$archive_dir, \$md5sum, \$expt_type );
+__exit__(__LINE__, "\n<<< STOPPING POINT >>>\nChecking and optimizing summary email code\n");
+
 
 # Create logfile for archive process
 my $logfile = LOG_OUT;
@@ -263,7 +274,6 @@ if ($extract) {
     data_extract();
 }
 elsif ($archive) {
-    # TODO:
     data_archive($file_manifest);
 } else {
 	print "$err You must choose archive (-a) or extract (-e) options when running this script\n\n";
@@ -275,7 +285,6 @@ sub gen_filelist {
     # output a file manifest depending on the type of server (PGM or S5) and the software version.
     # For S5 exportation, need the whole sigproc_results directory with the 96 blocks (~135GB) in order to do a whole
     # reanalysis like on PGM.  Not feasible, so skip that and just keep the BAM files.
-
     my ($platform,$version) = @_;
     
     # Get from any platform
@@ -319,10 +328,7 @@ sub gen_filelist {
     our @found_files;
     sub wanted {
         return if -d;
-        #my @filter_strings = qw( scraper flot lifechart bam);
-        #push(@found_files, $File::Find::name) unless grep {$_} @filter_strings;
         push(@found_files, $File::Find::name);
-
     }
 
     # Find globbed plugin out files and load up array.
@@ -346,8 +352,6 @@ sub gen_filelist {
     my $package_intact = check_data_package(\@file_manifest, $ts_version, $platform);
     ($package_intact) ?  log_msg(" All data located. Proceeding with archive creation\n") : halt(\$expt_dir, 1);
 
-    #dd \@file_manifest;
-    #__exit__('348', 'testing file manifest');
     return \@file_manifest;
 }
 
@@ -405,27 +409,15 @@ sub data_archive {
     push(@$archivelist, $bam_files);
 
     # Run the archive subs
-    # TODO:
     my $archive_dir = create_archive( $archivelist, $archive_name );
-
-    #now that we created the archive, we need to move the archive.
-    # TODO: need to get dest dir here!
     my $md5sum = copy_tarfile( \$archive_name, \$archive_dir);
 
-    __exit__(__LINE__, "\n<<< STOPPING POINT >>>\nChecking and optimizing copy operation\n");
-    exit;
-
-
-    #if ( $status == 1 ) {
-        #log_msg(" Archival of experiment '$output' completed successfully\n\n");
-        #print "Experiment archive completed successfully\n" if $quiet;
-        #send_mail( "success", \$case_num, \$archive_dir, \$md5sum, \$expt_type );
-    #} else {
-        #log_msg(" $err Archive creation failed for '$output'.  Check " . LOG_OUT . " for details\n\n");
-        #print "$err Archive creation failed for '$output'. Check " . LOG_OUT . " for details\n\n" if $quiet;
-        #halt(\$expt_dir, 4);
-    #}
-
+    # Finish up with summary email.
+    log_msg(" Archival of experiment '$output' completed successfully\n\n");
+    print "Experiment archive completed successfully\n" if $quiet;
+    send_mail( "success", \$case_num, \$archive_dir, \$md5sum, \$expt_type );
+    
+    __exit__(__LINE__, "\n<<< STOPPING POINT >>>\nChecking and optimizing summary email code\n");
 }
 
 sub copy_tarfile {
@@ -769,9 +761,51 @@ sub get_bams {
     return $tarfile;
 }
 
+sub find_mount_point {
+    my $archive_dir = shift;
+    my ($filesys, $mount);
+    open( my $mount_data, "-|", "df -Th $$archive_dir" );
+    while (<$mount_data>) {
+        next unless /^\/+/;
+        my @elems = split(/\s+/);
+        ($filesys, $mount) = @elems[0,6];
+    }
+    #my ($filesys_mount) = map{/^((?:\/+[-.\w+]+)+)/} <$mount_data>;
+    print "filesys: $filesys\nmount_point: $mount\narchive_dir: $$archive_dir\n";
+    my @mount_elems = split(/\//,$mount);
+    dd \@mount_elems;
+    my @archive_elems = split(/\//,$$archive_dir);
+    dd \@archive_elems;
+    my @remainder = keys %{{map {($_ => 1)} (@mount_elems, @archive_elems)}};
+    dd \@remainder;
+
+    __exit__(__LINE__, "\n<<< STOPPING POINT >>>\nCreating a mount point string that we can embed into the email\n";
+    exit;
+    my $path;
+    if ($filesys =~ /^\/dev/) {
+        $path = "Local directory, $$archive_dir";
+    } else {
+        ;;
+    }
+    
+    exit;
+    return ;
+    #return $filesys_mount;
+}
+
 sub send_mail {
     # Send out a system email upon error or completion of archive
+    # XXX
     my ($status, $case, $outdir, $md5sum, $type) = @_;
+    my $mount_point = find_mount_point($outdir);
+
+    my $full_output_path;
+    if ($mount_point =~ /^\/dev/) {
+        $full_output_path = 'Local server ' . $$outdir;
+    } else {
+        $full_output_path = 'smb:' . $mount_point . $$outdir;
+    }
+
     my @additional_recipients;
 
     $$case //= "---"; 
@@ -796,17 +830,20 @@ sub send_mail {
     # Get the hostname for the 'from' line in the email header.
     chomp(my $hostname = qx(hostname -s));
 
+    $run_name = 'NONSENSE!';
     if ( DEBUG_OUTPUT ) {
         no strict; no warnings;
         print "============  DEBUG  ============\n";
-        print "\ttime:   $time\n";
-        print "\ttype:   $$type\n";
-        print "\tstatus: $status\n";
-        print "\tname:   $run_name\n";
-        print "\tcase:   $$case\n";
-        print "\tpath:   $$outdir\n";
-        print "\tmd5sum: $$md5sum\n";
-        print "\tpgm:    $pgm_name\n";
+        print "\ttime:             $time\n";
+        print "\ttype:             $$type\n";
+        print "\tstatus:           $status\n";
+        print "\tname:             $run_name\n";
+        print "\tcase:             $$case\n";
+        print "\tmount:            $mount_point\n";
+        print "\tpath:             $$outdir\n";
+        print "\tfull output path: $full_output_path\n";
+        print "\tmd5sum:           $$md5sum\n";
+        print "\tpgm:              $pgm_name\n";
         print "=================================\n";
     }
 
@@ -827,11 +864,13 @@ sub send_mail {
         $cc_list = '';
     }
 
+
     my $content = read_file($msg);
     # Replace dummy fields with specific data in the message template.
     $content =~ s/%%CASE_NUM%%/$$case/g;
     $content =~ s/%%EXPT%%/$run_name/g;
-    $content =~ s/%%PATH%%/$$outdir/g;
+    #$content =~ s/%%PATH%%/$$outdir/g;
+    $content =~ s/%%PATH%%/$full_output_path/g;
     $content =~ s/%%PGM%%/$pgm_name/g;
     $content =~ s/%%MD5%%/$$md5sum/g;
     $content =~ s/%%DATE%%/$time/g;
@@ -850,7 +889,6 @@ glob
             },
             body_str => $content,
         );
-
         sendmail($message);
 }
 
