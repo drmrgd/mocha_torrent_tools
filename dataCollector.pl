@@ -10,8 +10,6 @@
 # the copied archive is compared to the original to make sure it did not get corrupted during the transfer
 # and if successful the local copy is deleted.
 #
-#
-#
 # 4/12/13 - D Sims
 ############################################################################################################
 use warnings;
@@ -111,7 +109,6 @@ sub help {
 }
 
 sub print_version {
-    # Have to change sub name due to 'version' package import for checking below
     printf "%s - %s\n", $scriptname, $version;
     exit;
 }
@@ -122,9 +119,9 @@ print_version if $ver_info;
 # Format the logfile output
 $Text::Wrap::columns = 123;
 my $space = ' ' x ( length( timestamp('timestamp') ) + 3 );
-my $warn =  colored("WARN:", 'bold yellow on_black');
-my $info =  colored("INFO:", 'bold green on_black');
-my $err =   colored("ERROR:", 'bold red on_black');
+my $warn  = colored("WARN:", 'bold yellow on_black');
+my $info  = colored("INFO:", 'bold green on_black');
+my $err   = colored("ERROR:", 'bold red on_black');
 my $debug = colored('DEBUG:', 'bold white on_magenta');
 my $note  = colored('NOTE:', 'bold white on_magenta');
 
@@ -151,18 +148,20 @@ if ( ! defined $expt_type || $expt_type ne 'general' && $expt_type ne 'clinical'
 my $expt_dir = abs_path($resultsDir);
 
 my $outdir_path;
-my $outdir = shift @ARGV || do { print "$err No destination directory input.  You must indicate a destination directory into which we'll put the data!\n\n"; die "$usage\n" };
+my $outdir = shift @ARGV || do { 
+    print "$err No destination directory input.  You must indicate a destination directory into which we'll put the data!\n\n"; die "$usage\n" 
+};
 (-d $outdir) ? ($outdir_path = abs_path($outdir)) : die "$err Destination directory '$outdir' can not be found!\n";
 
 
 # XXX
-my $case_num = 'demo';
-my $archive_dir = $outdir_path;
-my $md5sum = 'some_hash_val';
-my $expt_type = 'general';
-send_mail( "success", \$case_num, \$archive_dir, \$md5sum, \$expt_type );
-__exit__(__LINE__, "\n<<< STOPPING POINT >>>\nChecking and optimizing summary email code\n");
-
+# TODO: remove me!
+#my $case_num = 'demo';
+#my $archive_dir = $outdir_path;
+#my $md5sum = 'some_hash_val';
+#my $expt_type = 'general';
+#send_mail( "success", \$case_num, \$archive_dir, \$md5sum, \$expt_type );
+#__exit__(__LINE__, "\n<<< STOPPING POINT >>>\nChecking and optimizing summary email code\n");
 
 # Create logfile for archive process
 my $logfile = LOG_OUT;
@@ -785,6 +784,7 @@ sub find_mount_point {
         $path = "Local directory, $$archive_dir";
     } else {
         $path = $filesys . '/' . join('/', @remainder);
+        $path =~ s/\//\\/g; # make path Windows friendly....for now!
     }
     return $path;
 }
