@@ -16,6 +16,7 @@ use warnings;
 use strict;
 use version;
 use autodie;
+use feature 'state';
 
 use File::Basename;
 use IO::Tee;
@@ -24,7 +25,6 @@ use Text::Wrap;
 use Term::ANSIColor;
 use Cwd qw(abs_path getcwd);
 use Digest::MD5;
-use File::Copy;
 use File::Path qw(remove_tree);
 use Getopt::Long qw(:config bundling auto_abbrev no_ignore_case);
 use Data::Dump;
@@ -33,7 +33,6 @@ use File::Find;
 use Email::MIME;
 use Email::Sender::Simple qw(sendmail);
 use Parallel::ForkManager;
-use List::Util;
 
 use constant DEBUG_OUTPUT => 1;
 use constant LOG_OUT       => '/results/data_collect_dev/test.log';
@@ -46,7 +45,7 @@ print colored('*'x75, 'bold yellow on_black');
 print "\n\n";
 
 my $scriptname = basename($0);
-my $version = "v4.9.5_080916-dev";
+my $version = "v4.9.8_080916-dev";
 my $description = <<"EOT";
 Program to grab data from an Ion Torrent Run and either archive it, or create a directory that can be imported 
 to another analysis computer for processing.  
@@ -153,7 +152,6 @@ my $outdir = shift @ARGV || do {
 };
 (-d $outdir) ? ($outdir_path = abs_path($outdir)) : die "$err Destination directory '$outdir' can not be found!\n";
 
-
 # XXX
 # TODO: remove me!
 #my $case_num = 'demo';
@@ -162,26 +160,6 @@ my $outdir = shift @ARGV || do {
 #my $expt_type = 'general';
 #send_mail( "success", \$case_num, \$archive_dir, \$md5sum, \$expt_type );
 #__exit__(__LINE__, "\n<<< STOPPING POINT >>>\nChecking and optimizing summary email code\n");
-
-# Create logfile for archive process
-my $logfile = LOG_OUT;
-open( my $log_fh, ">>", $logfile ) || die "Can't open the logfile '$logfile' for writing\n";
-
-# Direct script messages to either a logfile or both STDOUT and a logfile
-my $msg;
-if ( $quiet ) {
-	print "$info Running script in quiet mode. Check the log in " . LOG_OUT ." for details\n";
-	$msg = $log_fh;
-} else {
-    $msg = IO::Tee->new( \*STDOUT, $log_fh );
-}
-
-sub log_msg {
-    # Set up logger print statements to make typing easier later!
-    my $text = shift;
-    print $msg timestamp('timestamp') . $text;
-    return;
-}
 
 # Verify that the server type is valid.
 my @valid_servers = qw( PGM S5 S5-XL S5XL );
@@ -219,7 +197,6 @@ if ( DEBUG_OUTPUT ) {
     print "\tRun Name     =>  $run_name\n";
     print "======================================\n\n";
 }
-
 ##----------------------------------------- End Command Arg Parsing ------------------------------------##
 
 # Stage the intial components of either an extraction or archive.
@@ -365,7 +342,7 @@ sub check_data_package {
     }
 
     # Now check to be sure that all of the plugin data we want for different run types are there
-   if ( ! grep { /variantCaller_out/ } @$archivelist ) {
+    if ( ! grep { /variantCaller_out/ } @$archivelist ) {
         if ( $r_and_d || $ocp_run ) {
             log_msg(" $warn No TVC results directory. Skipping...\n");
         } else {
@@ -414,7 +391,18 @@ sub data_archive {
     log_msg(" Archival of experiment '$output' completed successfully\n\n");
     print "Experiment archive completed successfully\n" if $quiet;
     send_mail( "success", \$case_num, \$archive_dir, \$md5sum, \$expt_type );
-    __exit__(__LINE__, "\n<<< STOPPING POINT >>>\nChecking and optimizing summary email code\n");
+}
+
+sub formatSize {
+    my $size = shift;
+    my $exp = 0;
+    state $units = [qw(B KB MB GB TB PB)];
+    for (@$units) {
+        last if $size < 1024;
+        $size /= 1024;
+        $exp++;
+   }
+   return wantarray ? ($size, $units->[$exp]) : sprintf("%.2f %s", $size, $units->[$exp]);
 }
 
 sub copy_tarfile {
@@ -431,15 +419,16 @@ sub copy_tarfile {
         print "========================================\n\n";
     }
 	log_msg(" Copying archive tarball to '$$archive_dir'.\n");
-	
+
     if ( DEBUG_OUTPUT ) {
         print "\n==============  $debug  ===============\n";
         print "\tpwd: $expt_dir\n";
         print "\tpath: $$archive_dir\n";
+        print "\tsize: " . formatSize(-s $$archivename) . "\n"; 
         print "========================================\n\n";
     }
-
-	if ( copy( $$archivename, $$archive_dir ) == 0 ) {
+    
+	if ( copy_data( $$archivename, $$archive_dir ) == 1 ) {
 		log_msg(" $err Copying archive to storage device: $!.\n");
         halt( \$expt_dir, 7 ); 
 	} else {
@@ -632,11 +621,12 @@ sub create_archive_dir {
 
 sub copy_data {
 	my ( $file, $location ) = @_;
-	print "Copying file '$file' to '$location'...\n";
+	log_msg(" Copying file '$file' to '$location'...\n");
 	if (sys_cmd(\"cp $file $location") != 0) {
         log_msg(" $err There was an issue copying '$file' to '$location'!\n");
-        halt(\$expt_dir, 5);
-    }
+        return 1;
+    } 
+    return 0;
 }
 
 sub sys_cmd {
@@ -768,22 +758,19 @@ sub find_mount_point {
         ($filesys, $mount) = @elems[0,6];
     }
     #my ($filesys_mount) = map{/^((?:\/+[-.\w+]+)+)/} <$mount_data>;
-    print "filesys: $filesys\nmount_point: $mount\narchive_dir: $$archive_dir\n";
+    #print "filesys: $filesys\nmount_point: $mount\narchive_dir: $$archive_dir\n";
 
-    my %count;
-    foreach (split(/\//, $$archive_dir), split(/\//, $mount)) {
-        $count{$_}++;
-    }
-    my @remainder;
-    foreach  my $elem ( keys %count ) {
-        push(@remainder, $elem) if $count{$elem} == 1;
+    my @mount_elems = split(/\//, $mount);
+    my @archive_elems = split(/\//, $$archive_dir);
+    for my $i (0..$#archive_elems) {
+        shift @archive_elems if $mount_elems[$i];
     }
 
     my $path;
     if ($filesys =~ /^\/dev/) {
         $path = "Local directory, $$archive_dir";
     } else {
-        $path = $filesys . '/' . join('/', @remainder);
+        $path = $filesys . '/' . join('/', @archive_elems);
         $path =~ s/\//\\/g; # make path Windows friendly....for now!
     }
     return $path;
@@ -791,9 +778,9 @@ sub find_mount_point {
 
 sub send_mail {
     # Send out a system email upon error or completion of archive
-    # XXX
     my ($status, $case, $outdir, $md5sum, $type) = @_;
     my $mount_point = find_mount_point($outdir);
+    print "mount point: $mount_point\n";
 
     my @additional_recipients;
 
@@ -812,6 +799,7 @@ sub send_mail {
         harringtonrd@mail.nih.gov
         vivekananda.datta@nih.gov
         patricia.runge@nih.gov
+        mary.barcus@nih.gov
         );
     }
     $$md5sum //= '---';
@@ -819,7 +807,6 @@ sub send_mail {
     # Get the hostname for the 'from' line in the email header.
     chomp(my $hostname = qx(hostname -s));
 
-    $run_name = 'NONSENSE!';
     if ( DEBUG_OUTPUT ) {
         no strict; no warnings;
         print "============  DEBUG  ============\n";
@@ -858,7 +845,6 @@ sub send_mail {
     # Replace dummy fields with specific data in the message template.
     $content =~ s/%%CASE_NUM%%/$$case/g;
     $content =~ s/%%EXPT%%/$run_name/g;
-    #$content =~ s/%%PATH%%/$$outdir/g;
     $content =~ s/%%PATH%%/$mount_point/g;
     $content =~ s/%%PGM%%/$pgm_name/g;
     $content =~ s/%%MD5%%/$$md5sum/g;
@@ -879,6 +865,25 @@ sub send_mail {
             body_str => $content,
         );
         sendmail($message);
+}
+
+sub log_msg {
+    # Set up logger print statements to make typing easier later!
+    my $text = shift;
+    
+    # Create logfile for archive process
+    my $logfile = LOG_OUT;
+    open( my $log_fh, ">>", $logfile ) || die "Can't open the logfile '$logfile' for writing\n";
+    # Direct script messages to either a logfile or both STDOUT and a logfile
+    my $msg;
+    if ( $quiet ) {
+        print "$info Running script in quiet mode. Check the log in " . LOG_OUT ." for details\n";
+        $msg = $log_fh;
+    } else {
+        $msg = IO::Tee->new( \*STDOUT, $log_fh );
+    }
+    print $msg timestamp('timestamp') . $text;
+    return;
 }
 
 sub __exit__ {
