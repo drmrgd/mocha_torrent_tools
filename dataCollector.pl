@@ -39,7 +39,6 @@ use List::Util;
 
 use constant DEBUG_OUTPUT => 1;
 use constant LOG_OUT       => '/results/data_collect_dev/test.log';
-#use constant LOG_OUT      => "$ENV{'HOME'}/datacollector_dev.log";
 #use constant LOG_OUT      => "/var/log/mocha/archive.log";
 
 my $string = ' 'x19 . "DEVELOPMENT VERSION OF DATACOLLECTOR" . ' 'x19;
@@ -49,7 +48,7 @@ print colored('*'x75, 'bold yellow on_black');
 print "\n\n";
 
 my $scriptname = basename($0);
-my $version = "v4.9.4_080816-dev";
+my $version = "v4.9.5_080916-dev";
 my $description = <<"EOT";
 Program to grab data from an Ion Torrent Run and either archive it, or create a directory that can be imported 
 to another analysis computer for processing.  
@@ -416,7 +415,6 @@ sub data_archive {
     log_msg(" Archival of experiment '$output' completed successfully\n\n");
     print "Experiment archive completed successfully\n" if $quiet;
     send_mail( "success", \$case_num, \$archive_dir, \$md5sum, \$expt_type );
-    
     __exit__(__LINE__, "\n<<< STOPPING POINT >>>\nChecking and optimizing summary email code\n");
 }
 
@@ -772,25 +770,23 @@ sub find_mount_point {
     }
     #my ($filesys_mount) = map{/^((?:\/+[-.\w+]+)+)/} <$mount_data>;
     print "filesys: $filesys\nmount_point: $mount\narchive_dir: $$archive_dir\n";
-    my @mount_elems = split(/\//,$mount);
-    dd \@mount_elems;
-    my @archive_elems = split(/\//,$$archive_dir);
-    dd \@archive_elems;
-    my @remainder = keys %{{map {($_ => 1)} (@mount_elems, @archive_elems)}};
-    dd \@remainder;
 
-    __exit__(__LINE__, "\n<<< STOPPING POINT >>>\nCreating a mount point string that we can embed into the email\n";
-    exit;
+    my %count;
+    foreach (split(/\//, $$archive_dir), split(/\//, $mount)) {
+        $count{$_}++;
+    }
+    my @remainder;
+    foreach  my $elem ( keys %count ) {
+        push(@remainder, $elem) if $count{$elem} == 1;
+    }
+
     my $path;
     if ($filesys =~ /^\/dev/) {
         $path = "Local directory, $$archive_dir";
     } else {
-        ;;
+        $path = $filesys . '/' . join('/', @remainder);
     }
-    
-    exit;
-    return ;
-    #return $filesys_mount;
+    return $path;
 }
 
 sub send_mail {
@@ -798,13 +794,6 @@ sub send_mail {
     # XXX
     my ($status, $case, $outdir, $md5sum, $type) = @_;
     my $mount_point = find_mount_point($outdir);
-
-    my $full_output_path;
-    if ($mount_point =~ /^\/dev/) {
-        $full_output_path = 'Local server ' . $$outdir;
-    } else {
-        $full_output_path = 'smb:' . $mount_point . $$outdir;
-    }
 
     my @additional_recipients;
 
@@ -864,17 +853,17 @@ sub send_mail {
         $cc_list = '';
     }
 
-
     my $content = read_file($msg);
+
     # Replace dummy fields with specific data in the message template.
     $content =~ s/%%CASE_NUM%%/$$case/g;
     $content =~ s/%%EXPT%%/$run_name/g;
     #$content =~ s/%%PATH%%/$$outdir/g;
-    $content =~ s/%%PATH%%/$full_output_path/g;
+    $content =~ s/%%PATH%%/$mount_point/g;
     $content =~ s/%%PGM%%/$pgm_name/g;
     $content =~ s/%%MD5%%/$$md5sum/g;
     $content =~ s/%%DATE%%/$time/g;
-glob 
+
     my $message = Email::MIME->create(
         header_str => [
             From     => 'ionadmin@'.$hostname.'.ncifcrf.gov',
