@@ -45,7 +45,7 @@ print colored('*'x75, 'bold yellow on_black');
 print "\n\n";
 
 my $scriptname = basename($0);
-my $version = "v4.9.8_080916-dev";
+my $version = "v4.9.9_081016-dev";
 my $description = <<"EOT";
 Program to grab data from an Ion Torrent Run and either archive it, or create a directory that can be imported 
 to another analysis computer for processing.  
@@ -151,15 +151,6 @@ my $outdir = shift @ARGV || do {
     print "$err No destination directory input.  You must indicate a destination directory into which we'll put the data!\n\n"; die "$usage\n" 
 };
 (-d $outdir) ? ($outdir_path = abs_path($outdir)) : die "$err Destination directory '$outdir' can not be found!\n";
-
-# XXX
-# TODO: remove me!
-#my $case_num = 'demo';
-#my $archive_dir = $outdir_path;
-#my $md5sum = 'some_hash_val';
-#my $expt_type = 'general';
-#send_mail( "success", \$case_num, \$archive_dir, \$md5sum, \$expt_type );
-#__exit__(__LINE__, "\n<<< STOPPING POINT >>>\nChecking and optimizing summary email code\n");
 
 # Verify that the server type is valid.
 my @valid_servers = qw( PGM S5 S5-XL S5XL );
@@ -758,19 +749,18 @@ sub find_mount_point {
         ($filesys, $mount) = @elems[0,6];
     }
     #my ($filesys_mount) = map{/^((?:\/+[-.\w+]+)+)/} <$mount_data>;
-    #print "filesys: $filesys\nmount_point: $mount\narchive_dir: $$archive_dir\n";
-
     my @mount_elems = split(/\//, $mount);
     my @archive_elems = split(/\//, $$archive_dir);
-    for my $i (0..$#archive_elems) {
-        shift @archive_elems if $mount_elems[$i];
+    my @remainder;
+    for my $elem (@archive_elems) {
+        push(@remainder, $elem) if ( ! grep { $elem eq $_ } @mount_elems );
     }
 
     my $path;
     if ($filesys =~ /^\/dev/) {
         $path = "Local directory, $$archive_dir";
     } else {
-        $path = $filesys . '/' . join('/', @archive_elems);
+        $path = $filesys . '/' . join('/', @remainder);
         $path =~ s/\//\\/g; # make path Windows friendly....for now!
     }
     return $path;
@@ -780,7 +770,6 @@ sub send_mail {
     # Send out a system email upon error or completion of archive
     my ($status, $case, $outdir, $md5sum, $type) = @_;
     my $mount_point = find_mount_point($outdir);
-    print "mount point: $mount_point\n";
 
     my @additional_recipients;
 
