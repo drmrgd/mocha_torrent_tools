@@ -45,20 +45,22 @@ print colored('*'x75, 'bold yellow on_black');
 print "\n\n";
 
 my $scriptname = basename($0);
-my $version = "v4.9.9_081016-dev";
+my $version = "v4.9.10_081116-dev";
 my $description = <<"EOT";
 Program to grab data from an Ion Torrent Run and either archive it, or create a directory that can be imported 
 to another analysis computer for processing.  
 
-For data import / export, program will grab raw data (starting from 1.wells file) from completed Ion Torrent 
+For data export, program will grab raw data (starting from 1.wells file) from completed Ion Torrent 
 NGS run, including all of the other raw data files required to reanalyze from basecalling through final 
-variant calling. The default location for the data is /results/xfer.
+variant calling. For S5 runs, the data is much too large to be able to do this.  So, data export will only
+be available for PGM runs.
 
-For archiving, a hardcoded list of files including the system log files (CSA archive) and the BAM files for 
-all of the barcoded samples, and the 'collectedVariants' directory will be added to a tar.gz archive. Note 
-that all data is required to be present for the script to run as these data components are required for a 
-full analysis and no archive would be complete without all of that data.  This data should also suffice for 
-downstream reanalysis starting from either basecalling or alignment if need be as it contains a superset of 
+For archiving, a hardcoded list of files including the system log files, BAM files, plugin results, and run
+metadata (version.txt, explog.txt, etc.) for a run will be added to a tar archive. We do not make a tarball
+since most of the data is binary and not compressible. Note that all data is required to be present for the 
+script to run as these data components are required for a full analysis and no archive would be complete without 
+all of that data.  This data should also suffice for downstream reanalysis starting from either basecalling or 
+alignment for PGM runs only (as with the export scripts) if need be as it contains a superset of 
 the data collected in the export option as well.
 EOT
 
@@ -188,7 +190,7 @@ if ( DEBUG_OUTPUT ) {
     print "\tRun Name     =>  $run_name\n";
     print "======================================\n\n";
 }
-##----------------------------------------- End Command Arg Parsing ------------------------------------##
+######----------------------------------------- End Command Arg Parsing ------------------------------------######
 
 # Stage the intial components of either an extraction or archive.
 chdir $expt_dir || die "Can not access the results directory '$expt_dir': $!";
@@ -321,50 +323,6 @@ sub gen_filelist {
     return \@file_manifest;
 }
 
-sub check_data_package {
-    my ($archivelist, $version, $platform) = @_;
-
-    log_msg(" $info Checking for mandatory, run specific data...\n");
-
-    # First let's just check the regular files that we must always have.
-    for my $file (@$archivelist) {
-        next if $file =~ /^plugin_out/;
-        die "$err Can't find file '$file'!!\n" unless (grep {-e} $file);
-    }
-
-    # Now check to be sure that all of the plugin data we want for different run types are there
-    if ( ! grep { /variantCaller_out/ } @$archivelist ) {
-        if ( $r_and_d || $ocp_run ) {
-            log_msg(" $warn No TVC results directory. Skipping...\n");
-        } else {
-            log_msg(" $err TVC results directory is missing. Did you run TVC?\n");
-            return 0;
-        }
-    }
-    if ( ! grep { /varCollector/ } @$archivelist ) {
-        if ( $r_and_d || $ocp_run ) {
-            log_msg(" $warn No varCollector plugin data. Skipping...\n");
-        } else {
-            log_msg(" $err No varCollector plugin data. Was varCollector run?\n");
-            return 0;
-        }
-    }
-    if ( ! grep { /AmpliconCoverageAnalysis_out/ } @$archivelist ) {
-        if ( $r_and_d || $ocp_run ) {
-            log_msg(" $warn No AmpliconCoverageAnalysisData. Skipping...\n");
-        } 
-    }
-    if ( ! grep { /coverageAnalysis_out/ } @$archivelist ) {
-        if ( $ocp_run && ! $r_and_d ) {
-            log_msg(" $err CoverageAnalysis data is missing.\n");
-            return 0;
-        } else {
-            log_msg(" $warn No CoverageAnalysis. Skipping...\n");
-        }
-    }
-    return 1;
-}
-
 sub data_archive {
     # Run full archive on data.
     my $archivelist = shift;
@@ -384,91 +342,40 @@ sub data_archive {
     send_mail( "success", \$case_num, \$archive_dir, \$md5sum, \$expt_type );
 }
 
-sub formatSize {
-    my $size = shift;
-    my $exp = 0;
-    state $units = [qw(B KB MB GB TB PB)];
-    for (@$units) {
-        last if $size < 1024;
-        $size /= 1024;
-        $exp++;
-   }
-   return wantarray ? ($size, $units->[$exp]) : sprintf("%.2f %s", $size, $units->[$exp]);
-}
+sub get_bams {
+    # Generate a tarfile of BAMs for the archive. No need to zip them as they can't be further compressed.
+    my $tarfile = basename($expt_dir) . "_library_bams.tar";
 
-sub copy_tarfile {
-    # Get an initial MD5sum of the tar file, copy it to final location, check integrity, and cleanup.
-    my ($archivename, $archive_dir) = @_;
+    open( my $sample_key, "<", "sampleKey.txt" );
+    my %samples = map{ chomp; split(/\t/) } <$sample_key>;
+    close $sample_key;
 
-    # Get md5sum for tarball prior to moving.
-	log_msg(" Getting MD5 hash for tarfile prior to copying.\n");
-    my $init_tarball_md5 = tarball_md5sum($archivename);
-    
-    if (DEBUG_OUTPUT) {
-        print "\n==============  $debug  ===============\n";
-        print "\tMD5 Hash = " . $init_tarball_md5 . "\n"; 
-        print "========================================\n\n";
-    }
-	log_msg(" Copying archive tarball to '$$archive_dir'.\n");
+    opendir(my $dir, $expt_dir);
+    my @bam_files = grep { /IonXpress.*\.bam$/ } readdir($dir);
 
-    if ( DEBUG_OUTPUT ) {
-        print "\n==============  $debug  ===============\n";
-        print "\tpwd: $expt_dir\n";
-        print "\tpath: $$archive_dir\n";
-        print "\tsize: " . formatSize(-s $$archivename) . "\n"; 
-        print "========================================\n\n";
-    }
-    
-	if ( copy_data( $$archivename, $$archive_dir ) == 1 ) {
-		log_msg(" $err Copying archive to storage device: $!.\n");
-        halt( \$expt_dir, 7 ); 
-	} else {
-		log_msg(" $info Archive successfully copied to archive storage device.\n");
-	}
-
-	# check integrity of the tarball
-	log_msg(" Calculating MD5 hash for copied archive.\n");
-    my $moved_archive = "$$archive_dir/$$archivename";
-    my $post_tarball_md5 = tarball_md5sum(\$moved_archive);
-
-    if (DEBUG_OUTPUT) {
-        print "\n==============  $debug  ===============\n";
-        print "\tMD5 Hash = " . $post_tarball_md5 . "\n"; 
-        print "========================================\n\n";
+    my @wanted_bams;
+    for my $bam (@bam_files) {
+        my ($barcode) = $bam =~ /(IonXpress_\d+)/;
+        push( @wanted_bams, $bam ) if exists $samples{$barcode};
     }
 
-	log_msg(" Comparing the MD5 hash value for local and fileshare copies of archive.\n");
-	if ( $init_tarball_md5 ne $post_tarball_md5 ) {
-		log_msg(" $err The md5sum for the archive does not agree after moving to the storage location. Retry the transfer manually\n");
-        halt( \$expt_dir, 2 );
-	} else {
-		log_msg(" $info The md5sum for the archive is in agreement. The local copy will now be deleted.\n");
-		unlink( $$archivename );
-	}
-    return $post_tarball_md5;
-}
-
-sub check_bam_tarfile {
-    # Check to see if we need to generate a new tar archive of the BAM files or we can use what we already have.
-    my ($tar_file, $bam_list) = @_;
-
-    open(my $tar_read, "-|", "tar -tf $tar_file");
-    my @tar_list = map{ split(/\n/,$_) } <$tar_read>;
-    
-    my %counter;
-    foreach my $element (@$bam_list, @tar_list) {
-        $counter{$element}++;
+    # Check to see if we need to generate a new zip archive or if we already have what we need.
+    log_msg(" Generating a tar archive of the library BAM files for the package...\n");
+    if ( -e $tarfile ) { 
+        log_msg(" $info tar archive already exists, checking for completeness.\n");
+        if (check_bam_tarfile($tarfile,\@wanted_bams)) {
+            log_msg(" \tTar archive appears to contain all the necessary files and is intact. Using that file.\n");
+            return $tarfile;
+        } else {
+            log_msg(" \tThe original tar archive is not suitable for use, making a new one.\n");
+        }
     }
-    (grep { $_ == 1 } values %counter) ? return 0 : return 1;
-}
-
-sub tarball_md5sum {
-    my $tarfile = shift;
-	open( my $pre_fh, "<", $$tarfile);
-	binmode( $pre_fh );
-	my $md5val = Digest::MD5->new->addfile($pre_fh)->hexdigest;
-	close( $pre_fh );
-    return $md5val;
+    my $tar_cmd = "tar cf $tarfile @wanted_bams";
+    if (sys_cmd(\$tar_cmd) != 0) {
+        log_msg(" $err There were issues creating the BAM tar file!\n");
+        halt(\$expt_dir, 1);
+    }
+    return $tarfile;
 }
 
 sub create_archive {
@@ -549,41 +456,6 @@ sub create_archive {
     return $archive_dir;
 }
 
-sub timestamp {
-	my $type = shift;
-	
-	if ( $type eq 'date' ) {
-		my $datestring = strftime( "%m%d%Y", localtime() );
-		return $datestring;
-	}
-	elsif ( $type eq 'timestamp' ) {
-		my $timestamp = "[" . strftime( "%a %b %d, %Y %H:%M:%S", localtime() ) . "]";
-		my $logstring = wrap( '', $space, $timestamp );
-		return $logstring;
-	}
-}
-
-sub halt {
-    my $expt_name = shift;
-    my $code = shift;
-    $code //= 4; # If nothing, go unspecified.
-
-    my %fail_codes = (
-        1  => "missing files",
-        2  => "failed checksum",
-        3  => "archive package or tarball creation failure",
-        4  => "unspecified error",
-        5  => "general system error",
-        6  => "settings error",
-        7  => "archive copy error",
-    );
-    my $error = colored($fail_codes{$code}, 'bold red on_black');
-
-    log_msg(" The archive script failed due to '$error' and is unable to continue.\n\n");
-    send_mail( "failure", \$case_num, $expt_name, undef, \$expt_type );
-	exit 1;
-}
-
 sub create_archive_dir {
     #Create an archive directory with a case name for pooling all clinical data together
     my $case = shift;
@@ -610,39 +482,100 @@ sub create_archive_dir {
     return $archive_dir;
 }
 
-sub copy_data {
-	my ( $file, $location ) = @_;
-	log_msg(" Copying file '$file' to '$location'...\n");
-	if (sys_cmd(\"cp $file $location") != 0) {
-        log_msg(" $err There was an issue copying '$file' to '$location'!\n");
-        return 1;
-    } 
-    return 0;
+sub check_data_package {
+    my ($archivelist, $version, $platform) = @_;
+
+    log_msg(" $info Checking for mandatory, run specific data...\n");
+
+    # First let's just check the regular files that we must always have.
+    for my $file (@$archivelist) {
+        next if $file =~ /^plugin_out/;
+        die "$err Can't find file '$file'!!\n" unless (grep {-e} $file);
+    }
+
+    # Now check to be sure that all of the plugin data we want for different run types are there
+    if ( ! grep { /variantCaller_out/ } @$archivelist ) {
+        if ( $r_and_d || $ocp_run ) {
+            log_msg(" $warn No TVC results directory. Skipping...\n");
+        } else {
+            log_msg(" $err TVC results directory is missing. Did you run TVC?\n");
+            return 0;
+        }
+    }
+    if ( ! grep { /varCollector/ } @$archivelist ) {
+        if ( $r_and_d || $ocp_run ) {
+            log_msg(" $warn No varCollector plugin data. Skipping...\n");
+        } else {
+            log_msg(" $err No varCollector plugin data. Was varCollector run?\n");
+            return 0;
+        }
+    }
+    if ( ! grep { /AmpliconCoverageAnalysis_out/ } @$archivelist ) {
+        if ( $r_and_d || $ocp_run ) {
+            log_msg(" $warn No AmpliconCoverageAnalysisData. Skipping...\n");
+        } 
+    }
+    if ( ! grep { /coverageAnalysis_out/ } @$archivelist ) {
+        if ( $ocp_run && ! $r_and_d ) {
+            log_msg(" $err CoverageAnalysis data is missing.\n");
+            return 0;
+        } else {
+            log_msg(" $warn No CoverageAnalysis. Skipping...\n");
+        }
+    }
+    return 1;
 }
 
-sub sys_cmd {
-    # Execute a system call and return the exit code for diagnosis.
-    my $system_call = shift;
-    my $rc;
+sub copy_tarfile {
+    # Get an initial MD5sum of the tar file, copy it to final location, check integrity, and cleanup.
+    my ($archivename, $archive_dir) = @_;
 
-    print "\t$debug Executing the following system call:\n\t$$system_call\n" if DEBUG_OUTPUT;
-    system($$system_call);
+    # Get md5sum for tarball prior to moving.
+	log_msg(" Getting MD5 hash for tarfile prior to copying.\n");
+    my $init_tarball_md5 = tarball_md5sum($archivename);
+    
+    if (DEBUG_OUTPUT) {
+        print "\n==============  $debug  ===============\n";
+        print "\tMD5 Hash = " . $init_tarball_md5 . "\n"; 
+        print "========================================\n\n";
+    }
+	log_msg(" Copying archive tarball to '$$archive_dir'.\n");
 
-    if ($? == -1) {
-        log_msg(" $err '$$system_call' failed to exectue: $!\n");
-        return $?;
+    if ( DEBUG_OUTPUT ) {
+        print "\n==============  $debug  ===============\n";
+        print "\tpwd: $expt_dir\n";
+        print "\tpath: $$archive_dir\n";
+        print "\tsize: " . formatSize(-s $$archivename) . "\n"; 
+        print "========================================\n\n";
     }
-    elsif ($? & 127) {
-        $rc = ($? & 127);
-        log_msg(" $err Process 'system_call' died with signal $rc\n");
-        return $rc;
-    } else {
-        $rc = ($? >> 8);
-        return 0 if $rc == 0;
-        log_msg(" $err '$$system_call' exited with value $rc\n");
-        return $rc;
+    
+	if ( copy_data( $$archivename, $$archive_dir ) == 1 ) {
+		log_msg(" $err Copying archive to storage device: $!.\n");
+        halt( \$expt_dir, 7 ); 
+	} else {
+		log_msg(" $info Archive successfully copied to archive storage device.\n");
+	}
+
+	# check integrity of the tarball
+	log_msg(" Calculating MD5 hash for copied archive.\n");
+    my $moved_archive = "$$archive_dir/$$archivename";
+    my $post_tarball_md5 = tarball_md5sum(\$moved_archive);
+
+    if (DEBUG_OUTPUT) {
+        print "\n==============  $debug  ===============\n";
+        print "\tMD5 Hash = " . $post_tarball_md5 . "\n"; 
+        print "========================================\n\n";
     }
-    return 0;
+
+	log_msg(" Comparing the MD5 hash value for local and fileshare copies of archive.\n");
+	if ( $init_tarball_md5 ne $post_tarball_md5 ) {
+		log_msg(" $err The md5sum for the archive does not agree after moving to the storage location. Retry the transfer manually\n");
+        halt( \$expt_dir, 2 );
+	} else {
+		log_msg(" $info The md5sum for the archive is in agreement. The local copy will now be deleted.\n");
+		unlink( $$archivename );
+	}
+    return $post_tarball_md5;
 }
 
 sub generate_md5sum {
@@ -676,67 +609,6 @@ sub generate_md5sum {
         $fork->finish;
     }
     $fork->wait_all_children;
-}
-
-sub version_check {
-    # Find out what TS version running in order to customize some downstream functions
-    log_msg(" $info Checking TSS version for file path info...\n");
-    open( my $ver_fh, "<", "version.txt" ) || die "$err can not open the version.txt file for reading: $!";
-    my %metadata = map{ chomp; split(/=/) } <$ver_fh>;
-    close $ver_fh;
-
-    log_msg("\tTSS version is '$metadata{'Torrent_Suite'}' running on host '$metadata{'host'}'\n");
-    return $metadata{'Torrent_Suite'}, $metadata{'host'};
-}
-
-sub sample_key_gen {
-    # Generate a sampleKey.txt file for the package
-    my $version = shift;
-    my $cmd;
-    ($version eq 'new') ? ($cmd = "sampleKeyGen.pl -r -o sampleKey.txt") : ($cmd = "sampleKeyGen.pl -o sampleKey.txt");
-    log_msg(" Generating a sampleKey.txt file for the export package...\n" );
-    if (sys_cmd(\$cmd) != 0) {
-        log_msg(" $err SampleKeyGen Script encountered errors!\n");
-        halt( \$expt_dir, 1);
-    }
-    return;
-}
-
-sub get_bams {
-    # Generate a tarfile of BAMs for the archive. No need to zip them as they can't be further compressed.
-    my $tarfile = basename($expt_dir) . "_library_bams.tar";
-
-    open( my $sample_key, "<", "sampleKey.txt" );
-    my %samples = map{ chomp; split(/\t/) } <$sample_key>;
-    close $sample_key;
-
-    opendir(my $dir, $expt_dir);
-    my @bam_files = grep { /IonXpress.*\.bam$/ } readdir($dir);
-
-    my @wanted_bams;
-    for my $bam (@bam_files) {
-        my ($barcode) = $bam =~ /(IonXpress_\d+)/;
-        push( @wanted_bams, $bam ) if exists $samples{$barcode};
-    }
-
-    # Check to see if we need to generate a new zip archive or if we already have what we need.
-    log_msg(" Generating a tar archive of the library BAM files for the package...\n");
-    if ( -e $tarfile ) { 
-        log_msg(" $info tar archive already exists, checking for completeness.\n");
-        if (check_bam_tarfile($tarfile,\@wanted_bams)) {
-            log_msg(" \tTar archive appears to contain all the necessary files and is intact. Using that file.\n");
-            return $tarfile;
-        } else {
-            log_msg(" \tThe original tar archive is not suitable for use, making a new one.\n");
-        }
-    }
-
-    my $tar_cmd = "tar cf $tarfile @wanted_bams";
-    if (sys_cmd(\$tar_cmd) != 0) {
-        log_msg(" $err There were issues creating the BAM tar file!\n");
-        halt(\$expt_dir, 1);
-    }
-    return $tarfile;
 }
 
 sub find_mount_point {
@@ -856,35 +728,6 @@ sub send_mail {
         sendmail($message);
 }
 
-sub log_msg {
-    # Set up logger print statements to make typing easier later!
-    my $text = shift;
-    
-    # Create logfile for archive process
-    my $logfile = LOG_OUT;
-    open( my $log_fh, ">>", $logfile ) || die "Can't open the logfile '$logfile' for writing\n";
-    # Direct script messages to either a logfile or both STDOUT and a logfile
-    my $msg;
-    if ( $quiet ) {
-        print "$info Running script in quiet mode. Check the log in " . LOG_OUT ." for details\n";
-        $msg = $log_fh;
-    } else {
-        $msg = IO::Tee->new( \*STDOUT, $log_fh );
-    }
-    print $msg timestamp('timestamp') . $text;
-    return;
-}
-
-sub __exit__ {
-    # Dev exit code just to help with figuring out where I am as I'm debugging chunks of code. 
-    my ($line, $msg)  = @_;
-    print "\n";
-    print colored(">>>>  Got exit signal at line: $line  >>>>", 'BOLD white on_green');
-    print "$msg\n" if $msg;
-    print "\n";
-    exit;
-}
-
 sub data_extract {
     # TODO: Going to need to totally rework this for an S5 run.  Then again, this may not be possible.  For now, 
     #       just halt on attempts with an S5 run?
@@ -931,4 +774,162 @@ sub data_extract {
     }
 
     print "Finished copying data package for export.  Data ready in '$destination_dir'\n";
+}
+
+sub formatSize {
+    my $size = shift;
+    my $exp = 0;
+    state $units = [qw(B KB MB GB TB PB)];
+    for (@$units) {
+        last if $size < 1024;
+        $size /= 1024;
+        $exp++;
+   }
+   return wantarray ? ($size, $units->[$exp]) : sprintf("%.2f %s", $size, $units->[$exp]);
+}
+
+sub version_check {
+    # Find out what TS version running in order to customize some downstream functions
+    log_msg(" $info Checking TSS version for file path info...\n");
+    open( my $ver_fh, "<", "version.txt" ) || die "$err can not open the version.txt file for reading: $!";
+    my %metadata = map{ chomp; split(/=/) } <$ver_fh>;
+    close $ver_fh;
+
+    log_msg("\tTSS version is '$metadata{'Torrent_Suite'}' running on host '$metadata{'host'}'\n");
+    return $metadata{'Torrent_Suite'}, $metadata{'host'};
+}
+
+sub sample_key_gen {
+    # Generate a sampleKey.txt file for the package
+    my $version = shift;
+    my $cmd;
+    ($version eq 'new') ? ($cmd = "sampleKeyGen.pl -r -o sampleKey.txt") : ($cmd = "sampleKeyGen.pl -o sampleKey.txt");
+    log_msg(" Generating a sampleKey.txt file for the export package...\n" );
+    if (sys_cmd(\$cmd) != 0) {
+        log_msg(" $err SampleKeyGen Script encountered errors!\n");
+        halt( \$expt_dir, 1);
+    }
+    return;
+}
+
+sub check_bam_tarfile {
+    # Check to see if we need to generate a new tar archive of the BAM files or we can use what we already have.
+    my ($tar_file, $bam_list) = @_;
+
+    open(my $tar_read, "-|", "tar -tf $tar_file");
+    my @tar_list = map{ split(/\n/,$_) } <$tar_read>;
+    
+    my %counter;
+    foreach my $element (@$bam_list, @tar_list) {
+        $counter{$element}++;
+    }
+    (grep { $_ == 1 } values %counter) ? return 0 : return 1;
+}
+
+sub tarball_md5sum {
+    my $tarfile = shift;
+	open( my $pre_fh, "<", $$tarfile);
+	binmode( $pre_fh );
+	my $md5val = Digest::MD5->new->addfile($pre_fh)->hexdigest;
+	close( $pre_fh );
+    return $md5val;
+}
+
+sub timestamp {
+	my $type = shift;
+	
+	if ( $type eq 'date' ) {
+		my $datestring = strftime( "%m%d%Y", localtime() );
+		return $datestring;
+	}
+	elsif ( $type eq 'timestamp' ) {
+		my $timestamp = "[" . strftime( "%a %b %d, %Y %H:%M:%S", localtime() ) . "]";
+		my $logstring = wrap( '', $space, $timestamp );
+		return $logstring;
+	}
+}
+
+sub log_msg {
+    # Set up logger print statements to make typing easier later!
+    my $text = shift;
+    
+    # Create logfile for archive process
+    my $logfile = LOG_OUT;
+    open( my $log_fh, ">>", $logfile ) || die "Can't open the logfile '$logfile' for writing\n";
+    # Direct script messages to either a logfile or both STDOUT and a logfile
+    my $msg;
+    if ( $quiet ) {
+        print "$info Running script in quiet mode. Check the log in " . LOG_OUT ." for details\n";
+        $msg = $log_fh;
+    } else {
+        $msg = IO::Tee->new( \*STDOUT, $log_fh );
+    }
+    print $msg timestamp('timestamp') . $text;
+    return;
+}
+
+sub copy_data {
+	my ( $file, $location ) = @_;
+	log_msg(" Copying file '$file' to '$location'...\n");
+	if (sys_cmd(\"cp $file $location") != 0) {
+        log_msg(" $err There was an issue copying '$file' to '$location'!\n");
+        return 1;
+    } 
+    return 0;
+}
+
+sub sys_cmd {
+    # Execute a system call and return the exit code for diagnosis.
+    my $system_call = shift;
+    my $rc;
+
+    print "\t$debug Executing the following system call:\n\t$$system_call\n" if DEBUG_OUTPUT;
+    system($$system_call);
+
+    if ($? == -1) {
+        log_msg(" $err '$$system_call' failed to exectue: $!\n");
+        return $?;
+    }
+    elsif ($? & 127) {
+        $rc = ($? & 127);
+        log_msg(" $err Process 'system_call' died with signal $rc\n");
+        return $rc;
+    } else {
+        $rc = ($? >> 8);
+        return 0 if $rc == 0;
+        log_msg(" $err '$$system_call' exited with value $rc\n");
+        return $rc;
+    }
+    return 0;
+}
+
+sub __exit__ {
+    # Dev exit code just to help with figuring out where I am as I'm debugging chunks of code. 
+    my ($line, $msg)  = @_;
+    print "\n";
+    print colored(">>>>  Got exit signal at line: $line  >>>>", 'BOLD white on_green');
+    print "$msg\n" if $msg;
+    print "\n";
+    exit;
+}
+
+sub halt {
+    my $expt_name = shift;
+    my $code = shift;
+    $code //= 4; # If nothing, go unspecified.
+
+    my %fail_codes = (
+        1  => "missing files",
+        2  => "failed checksum",
+        3  => "archive package or tarball creation failure",
+        4  => "unspecified error",
+        5  => "general system error",
+        6  => "settings error",
+        7  => "archive copy error",
+    );
+    my $error = colored($fail_codes{$code}, 'bold red on_black');
+
+    log_msg(" The archive script failed due to '$error' and is unable to continue.\n\n");
+    send_mail( "failure", \$case_num, $expt_name, undef, \$expt_type );
+	exit 1;
 }
