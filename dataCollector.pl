@@ -38,14 +38,14 @@ use constant DEBUG_OUTPUT => 0;
 #use constant LOG_OUT       => '/results/data_collect_dev/test.log';
 use constant LOG_OUT      => "/var/log/mocha/archive.log";
 
-my $string = ' 'x19 . "DEVELOPMENT VERSION OF DATACOLLECTOR" . ' 'x19;
-print colored( '*'x75, 'bold yellow on_black');
-print colored("\n$string\n", 'bold yellow on_black');
-print colored('*'x75, 'bold yellow on_black');
-print "\n\n";
+#my $string = ' 'x19 . "DEVELOPMENT VERSION OF DATACOLLECTOR" . ' 'x19;
+#print colored( '*'x75, 'bold yellow on_black');
+#print colored("\n$string\n", 'bold yellow on_black');
+#print colored('*'x75, 'bold yellow on_black');
+#print "\n\n";
 
 my $scriptname = basename($0);
-my $version = "v4.9.12_081216-dev";
+my $version = "v5.0.0_081216";
 my $description = <<"EOT";
 Program to grab data from an Ion Torrent Run and either archive it, or create a directory that can be imported 
 to another analysis computer for processing.  
