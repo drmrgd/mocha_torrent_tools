@@ -6,7 +6,7 @@ import re
 import subprocess
 import shutil
 
-version = '1.0.0_081216'
+version = '0.1.0_081216'
 
 def main():
     if len(sys.argv) < 3:
@@ -16,9 +16,11 @@ def main():
     rundir,caselist = sys.argv[1:]
 
     # Make a backup of the current CLIA caselist file before we proceed just in case bad things happen while we're editing it.
-    shutil.copy2(caselist,'.' + caselist + '.bak')
+    (path,cfile_name) = os.path.split(caselist)
+    bak_file = '.' + cfile_name + '.bak'
+    shutil.copy2(caselist,os.path.join(path, bak_file))
 
-    run_name = re.match('^Auto_user_(.*?\w{3})_\d+_\d+\/?$',os.path.basename(rundir)).group(1)
+    run_name = re.match('^Auto_user_(.*?\w{3})_\d+_\d+\/?$',os.path.basename(rundir.rstrip('/'))).group(1)
     msn_list = get_msn_list(rundir)
     next_casenum = gen_casenum(caselist)
     gen_case_list_string(run_name,msn_list,next_casenum,caselist)
