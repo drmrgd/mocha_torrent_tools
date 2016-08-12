@@ -34,9 +34,9 @@ use Email::MIME;
 use Email::Sender::Simple qw(sendmail);
 use Parallel::ForkManager;
 
-use constant DEBUG_OUTPUT => 1;
-use constant LOG_OUT       => '/results/data_collect_dev/test.log';
-#use constant LOG_OUT      => "/var/log/mocha/archive.log";
+use constant DEBUG_OUTPUT => 0;
+#use constant LOG_OUT       => '/results/data_collect_dev/test.log';
+use constant LOG_OUT      => "/var/log/mocha/archive.log";
 
 my $string = ' 'x19 . "DEVELOPMENT VERSION OF DATACOLLECTOR" . ' 'x19;
 print colored( '*'x75, 'bold yellow on_black');
@@ -45,7 +45,7 @@ print colored('*'x75, 'bold yellow on_black');
 print "\n\n";
 
 my $scriptname = basename($0);
-my $version = "v4.9.10_081116-dev";
+my $version = "v4.9.12_081216-dev";
 my $description = <<"EOT";
 Program to grab data from an Ion Torrent Run and either archive it, or create a directory that can be imported 
 to another analysis computer for processing.  
@@ -398,7 +398,7 @@ sub create_archive {
 
     # We don't want to archive symlinked files since they probably won't work....i think.  Let's skip those 
     my @final_file_list = grep{ ! -l $_ } @$filelist;
-    printf "$note Calculating MD5Sum for %s files\n", scalar(@final_file_list);
+    printf "$note Calculating MD5Sum for %s files\n", scalar(@final_file_list) if DEBUG_OUTPUT;
     generate_md5sum($filelist);
     push(@final_file_list, 'md5sum.txt');
 
