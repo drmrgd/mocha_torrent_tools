@@ -10,6 +10,8 @@
 # the copied archive is compared to the original to make sure it did not get corrupted during the transfer
 # and if successful the local copy is deleted.
 #
+# TODO:  Need to figure out a way to deal with new IQOQ experiments that don't conform to our typical runs
+#
 # 4/12/13 - D Sims
 ############################################################################################################
 use warnings;
@@ -45,7 +47,7 @@ use constant LOG_OUT      => "/var/log/mocha/archive.log";
 #print "\n\n";
 
 my $scriptname = basename($0);
-my $version = "v5.0.0_081216";
+my $version = "v5.0.1_101916";
 my $description = <<"EOT";
 Program to grab data from an Ion Torrent Run and either archive it, or create a directory that can be imported 
 to another analysis computer for processing.  
@@ -807,7 +809,9 @@ sub sample_key_gen {
     log_msg(" Generating a sampleKey.txt file for the export package...\n" );
     if (sys_cmd(\$cmd) != 0) {
         log_msg(" $err SampleKeyGen Script encountered errors!\n");
-        halt( \$expt_dir, 1);
+        ($r_and_d) 
+            ? log_msg("\tSince this is an R&D experiment, will continue archive process anyway.\n")
+            : halt( \$expt_dir, 1);
     }
     return;
 }
