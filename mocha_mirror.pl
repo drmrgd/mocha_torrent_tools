@@ -21,7 +21,7 @@ use Log::Log4perl qw{ get_logger };
 use constant DEBUG_OUTPUT => 0;
 
 my $scriptname = basename($0);
-my $version = "v3.2.0_053116";
+my $version = "v3.2.1_102116";
 my $description = <<"EOT";
 Script to mirror report data to an external hard drive mounted to a Ion Torrent Server.  This script will 
 determine the data size of the external hard drive, and if needed rotate out the oldest run (note: not 
@@ -125,7 +125,9 @@ my $data_size = check_size($backup_path);
 while ( $data_size > 10000) {
     $logger->info("Backup drive too full.  Clearing space for new runs");
     rotate_data( \$backup_path );
-    $data_size = check_size();
+    #$data_size = check_size();
+    # XXX
+    $data_size = check_size($backup_path);
 } 
 $logger->info("Looks like there is sufficient space for more data");
 
