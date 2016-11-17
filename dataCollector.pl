@@ -47,7 +47,7 @@ use constant LOG_OUT      => "/var/log/mocha/archive.log";
 #print "\n\n";
 
 my $scriptname = basename($0);
-my $version = "v5.0.1_101916";
+my $version = "v5.0.2_111716";
 my $description = <<"EOT";
 Program to grab data from an Ion Torrent Run and either archive it, or create a directory that can be imported 
 to another analysis computer for processing.  
@@ -166,7 +166,7 @@ unless ( grep{$_ eq $server_type} @valid_servers ) {
 }
 
 # Setup custom and default output names
-my ( $run_name ) = $expt_dir =~ /((?:S5-)?[MP]C[C12345]-\d+.*_\d+)\/?$/;;
+my ( $run_name ) = $expt_dir =~ /((?:S5-)?[MP]C[C123456]-\d+.*_\d+)\/?$/;;
 $output = "$run_name." . timestamp('date') if ( ! defined $output );
 
 my $method; 
@@ -648,7 +648,7 @@ sub send_mail {
     my @additional_recipients;
 
     $$case //= "---"; 
-    my ($pgm_name) = $run_name =~ /(?:S5-)?([PM]C[C12345]-\d+)/;
+    my ($pgm_name) = $run_name =~ /(?:S5-)?([PM]C[C123456]-\d+)/;
     $pgm_name //= 'Unknown';
     (my $time = timestamp('timestamp')) =~ s/[\[\]]//g;
 
