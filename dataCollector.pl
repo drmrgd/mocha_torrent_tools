@@ -45,7 +45,7 @@ use constant LOG_OUT      => "/var/log/mocha/archive.log";
 #print "\n\n";
 
 my $scriptname = basename($0);
-my $version = "v5.3.0_061217";
+my $version = "v5.4.0_061317";
 my $description = <<"EOT";
 Program to grab data from an Ion Torrent Run and either archive it, or create a directory that can be imported 
 to another analysis computer for processing.  
@@ -342,18 +342,34 @@ sub data_archive {
     my $archive_dir;
 
     # Collect BAM files for the archive if we have them.
+    my $bam_files;
     if ($expt_type ne 'qualification') {
-        my $bam_files = get_bams();
+        $bam_files = get_bams();
         push(@$archivelist, $bam_files);
     }
 
     $archive_dir = create_archive( $archivelist, $archive_name );
     my $md5sum = copy_tarfile( \$archive_name, \$archive_dir);
 
-    # Finish up with summary email.
+
     log_msg(" Archival of experiment '$output' completed successfully\n\n");
     print "Experiment archive completed successfully\n" if $quiet;
+
+    # Finish up with summary email.
+    log_msg(" Cleaning up extra, uneeded files:\n");
+    cleanup([$bam_files, 'md5sum.txt']);
+
     send_mail( "success", \$case_num, \$archive_dir, \$md5sum, \$expt_type );
+}
+
+sub cleanup {
+    # Get rid of data that we no longer need so that we can keep our drives a little cleaner
+    my $unwanted = shift;
+    for my $file (@$unwanted) {
+        print "\t -> $file\n";
+        unlink $file;
+    }
+    log_msg(" Done purging temp files.\n");
 }
 
 sub get_bams {
