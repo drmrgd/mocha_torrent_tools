@@ -44,8 +44,9 @@ use constant LOG_OUT      => "/var/log/mocha/archive.log";
 #print colored('*'x75, 'bold yellow on_black');
 #print "\n\n";
 
+
 my $scriptname = basename($0);
-my $version = "v5.4.0_061317";
+my $version = "v5.4.1_071017";
 my $description = <<"EOT";
 Program to grab data from an Ion Torrent Run and either archive it, or create a directory that can be imported 
 to another analysis computer for processing.  
@@ -692,7 +693,7 @@ sub send_mail {
     my $target = 'simsdj@mail.nih.gov';
     
     my @additional_recipients = '';
-    if ($type eq 'clinical' and ! DEBUG_OUTPUT) {
+    if ($$type eq 'clinical' and ! DEBUG_OUTPUT) {
         @additional_recipients = qw( 
         harringtonrd@mail.nih.gov
         vivekananda.datta@nih.gov
