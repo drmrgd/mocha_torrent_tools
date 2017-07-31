@@ -46,7 +46,7 @@ use constant LOG_OUT      => "/var/log/mocha/archive.log";
 
 
 my $scriptname = basename($0);
-my $version = "v5.4.1_071017";
+my $version = "v5.4.2_073117";
 my $description = <<"EOT";
 Program to grab data from an Ion Torrent Run and either archive it, or create a directory that can be imported 
 to another analysis computer for processing.  
@@ -307,7 +307,10 @@ sub gen_filelist {
 
     # Start generating a specific file manifest list.
     if ($expt_type eq 'qualification') {
-        find(\&wanted, glob 'rawlib*');
+        # Try just globbing all "rawlib" files since it seems sometimes the lab folks use normal E Coli qualification
+        # library and sometimes they put on an actual run.  
+        #find(\&wanted, glob 'rawlib*');
+        find(\&wanted, glob '*rawlib.bam');
     } else {
         find(\&wanted, 'plugin_out');
     }
