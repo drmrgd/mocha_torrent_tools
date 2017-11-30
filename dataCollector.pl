@@ -10,8 +10,6 @@
 # the copied archive is compared to the original to make sure it did not get corrupted during the transfer
 # and if successful the local copy is deleted.
 #
-# TODO:  Need to figure out a way to deal with new IQOQ experiments that don't conform to our typical runs
-#
 # 4/12/13 - D Sims
 ############################################################################################################
 use warnings;
@@ -37,7 +35,7 @@ use Email::Sender::Simple qw(sendmail);
 use Parallel::ForkManager;
 
 use constant DEBUG_OUTPUT => 0;
-#use constant LOG_OUT       => '/results/data_collect_dev/test.log';
+#use constant LOG_OUT       => '/home/ionadmin/test.log';
 use constant LOG_OUT      => "/var/log/mocha/archive.log";
 
 #my $string = ' 'x19 . "DEVELOPMENT VERSION OF DATACOLLECTOR" . ' 'x19;
@@ -46,8 +44,9 @@ use constant LOG_OUT      => "/var/log/mocha/archive.log";
 #print colored('*'x75, 'bold yellow on_black');
 #print "\n\n";
 
+
 my $scriptname = basename($0);
-my $version = "v5.0.2_111716";
+my $version = "v5.4.2_073117";
 my $description = <<"EOT";
 Program to grab data from an Ion Torrent Run and either archive it, or create a directory that can be imported 
 to another analysis computer for processing.  
@@ -68,14 +67,14 @@ EOT
 
 my $usage = <<"EOT";
 USAGE: $scriptname [options] [-t] <'clinical', 'general'> [-a | -e] <results_dir> <destination_dir>
-    -t, --type       Type of experiment data to be archived ('clinical', 'general').
+    -t, --type       Type of experiment data to be archived ('clinical', 'general', or 'qualification').
     -a, --archive    Create tarball archive of the run data
     -e, --extract    Extract the data for re-analysis on another computer.
     -c, --case       Case number to use for new directory generation
     -O, --OCP        Run is from OCP; Variant calling data on IR / MATCHbox, don't include in archive.
     -o, --output     Custom output file name.  (DEFAULT: 'run_name.mmddyyy')
     -r, --randd      Server is R&D server; do not email notify group and be more flexible with missing data.
-    -s, --server     Server type.  Can be PGM or S5 (DEFAULT: PGM).
+    -s, --server     Server type.  Can be PGM or S5 (DEFAULT: S5).
     -q, --quiet      Run quietly without sending messages to STDOUT
     -v, --version    Version Information
     -h, --help       Display the help information
@@ -91,7 +90,7 @@ my $case_num;
 my $r_and_d;
 my $ocp_run;
 my $expt_type;
-my $server_type = 'PGM';
+my $server_type = 'S5';
 
 GetOptions( "help|h"      => \$help,
             "version|v"   => \$ver_info,
@@ -138,13 +137,16 @@ elsif ( ! -d $resultsDir ) {
 	die "$err The results directory '$resultsDir' can not be found.\n\n";
 }
 elsif ( $resultsDir =~ /.*_tn_\d+\/?$/ ) {
-    die "$err An S5 thumbnail directory is only a partial dataset that can not be backed up. Use a full report directory instead!\n";
+    die "$err An S5 thumbnail directory is only a partial dataset that can not be backed up. Use a full report 
+         directory instead!\n";
 }
 
 # Check for experiment type to know how to deal with this later.  May combine / supercede $r_and_d.
-if ( ! defined $expt_type || $expt_type ne 'general' && $expt_type ne 'clinical' ) {
-    print "$err No experiment type defined.  Please choose 'clinical' or 'general'\n\n";
-    die $usage;
+my @valid_expt_types = qw(general clinical qualification);
+unless ( defined $expt_type && grep {$expt_type eq $_ } @valid_expt_types ) {
+    print "$err No experiment type defined or invalid type enteres.  Please choose from:\n";
+    print "\t-  $_\n" for @valid_expt_types;
+    die "\n$usage";
 }
 
 # Get the absolute path of the target and starting dirs to make it easier.
@@ -167,6 +169,7 @@ unless ( grep{$_ eq $server_type} @valid_servers ) {
 
 # Setup custom and default output names
 my ( $run_name ) = $expt_dir =~ /((?:S5-)?[MP]C[C123456]-\d+.*_\d+)\/?$/;;
+$run_name //= 'unknown';
 $output = "$run_name." . timestamp('date') if ( ! defined $output );
 
 my $method; 
@@ -205,12 +208,14 @@ my ($ts_version,$host) = version_check();
 my $old_version = version->parse('4.4.2');
 my $curr_version = version->parse($ts_version);
 
-if ($curr_version > $old_version) {
-    log_msg(" $info TSv5.0+ run detected. Using 'ion_params_00.json file for sampleKey.txt file generation...\n");
-    sample_key_gen('new');
-} else {
-    log_msg(" $info An older version ($ts_version) was detected. Using sampleKeyGen call\n");
-    sample_key_gen('old');
+unless ($expt_type eq 'qualification') {
+    if ($curr_version > $old_version) {
+        log_msg(" $info TSv5.0+ run detected. Using 'ion_params_00.json file for sampleKey.txt file generation...\n");
+        sample_key_gen('new');
+    } else {
+        log_msg(" $info An older version ($ts_version) was detected. Using sampleKeyGen call\n");
+        sample_key_gen('old');
+    }
 }
 
 if ($server_type eq 'PGM' && $host =~ /S5XL/) {
@@ -261,21 +266,19 @@ sub gen_filelist {
     my @common_list = qw(
         drmaa_stdout.txt
         explog_final.txt
-        explog.txt
         expMeta.dat
         pgm_logs.zip
         ion_params_00.json 
         report.pdf
         version.txt
         sysinfo.txt
-        InitLog.txt
         sampleKey.txt
         basecaller_results/BaseCaller.json
         serialized*json
-        );
+    );
 
     # Only available on PGM
-    my @pgm_file_list = qw{
+    my @pgm_file_list = qw(
         basecaller_results/datasets_basecaller.json
         basecaller_results/datasets_pipeline.json
         Bead_density_raw.png
@@ -292,21 +295,27 @@ sub gen_filelist {
         sigproc_results/analysis_return_code.txt
         sigproc_results/avgNukeTrace_ATCG.txt
         sigproc_results/avgNukeTrace_TCAG.txt
-    };
+    );
 
     # Load up the plugins results and start to generate the master file manifest.
     our @found_files;
+    no warnings 'File::Find'; # Throw out File::Find warnings since we're going to handle all of that later.
     sub wanted {
         return if -d;
         push(@found_files, $File::Find::name);
     }
 
-    # Find globbed plugin out files and load up array.
-    find(\&wanted, 'plugin_out');
-    my @plugin_results = @found_files;
+    # Start generating a specific file manifest list.
+    if ($expt_type eq 'qualification') {
+        # Try just globbing all "rawlib" files since it seems sometimes the lab folks use normal E Coli qualification
+        # library and sometimes they put on an actual run.  
+        #find(\&wanted, glob 'rawlib*');
+        find(\&wanted, glob '*rawlib.bam');
+    } else {
+        find(\&wanted, 'plugin_out');
+    }
 
     # Reset found_files array and get common globbed files.
-    @found_files = ();
     for my $elem (@common_list) {
         find(\&wanted, glob $elem);
     }
@@ -314,9 +323,14 @@ sub gen_filelist {
     # Add platform specific files to the manifest.
     my @file_manifest;
     if ($$platform eq 'PGM') {
-        @file_manifest = (@found_files, @plugin_results, @pgm_file_list);
+        @file_manifest = (@found_files, @pgm_file_list);
     } else {
-        @file_manifest = (@found_files, @plugin_results);
+        @file_manifest = @found_files;
+    }
+    
+    # Can't generate a sample key for instrument qualification runs, so we need to remove it from the manifest.
+    if ($expt_type eq 'qualification') {
+        @file_manifest = grep { $_ !~ /sampleKey\.txt/ } @file_manifest;
     }
 
     my $package_intact = check_data_package(\@file_manifest, $ts_version, $platform);
@@ -329,19 +343,37 @@ sub data_archive {
     # Run full archive on data.
     my $archivelist = shift;
     my $archive_name = "$output.tar";
+    my $archive_dir;
 
-    # Collect BAM files for the archive
-    my $bam_files = get_bams();
-    push(@$archivelist, $bam_files);
+    # Collect BAM files for the archive if we have them.
+    my $bam_files;
+    if ($expt_type ne 'qualification') {
+        $bam_files = get_bams();
+        push(@$archivelist, $bam_files);
+    }
 
-    # Run the archive subs
-    my $archive_dir = create_archive( $archivelist, $archive_name );
+    $archive_dir = create_archive( $archivelist, $archive_name );
     my $md5sum = copy_tarfile( \$archive_name, \$archive_dir);
 
-    # Finish up with summary email.
+
     log_msg(" Archival of experiment '$output' completed successfully\n\n");
     print "Experiment archive completed successfully\n" if $quiet;
+
+    # Finish up with summary email.
+    log_msg(" Cleaning up extra, uneeded files:\n");
+    cleanup([$bam_files, 'md5sum.txt']);
+
     send_mail( "success", \$case_num, \$archive_dir, \$md5sum, \$expt_type );
+}
+
+sub cleanup {
+    # Get rid of data that we no longer need so that we can keep our drives a little cleaner
+    my $unwanted = shift;
+    for my $file (@$unwanted) {
+        print "\t -> $file\n";
+        unlink $file;
+    }
+    log_msg(" Done purging temp files.\n");
 }
 
 sub get_bams {
@@ -407,7 +439,8 @@ sub create_archive {
     # Instead of a tarball, just create tarfile for easy distribution; the compression isn't very good for the dataset.
 	log_msg(" Creating a tar archive of $archivename.\n");
     
-    # Since tar has a limit on how many args we can pass at a time, write the filelist to a file and pass that list to tar.  
+    # Since tar has a limit on how many args we can pass at a time, write the filelist to a file and pass that 
+    # list to tar.  
     open(my $tar_fh, ">", 'tar_filelist.list');
     print {$tar_fh} "$_\n" for @final_file_list;
     close $tar_fh;
@@ -486,6 +519,7 @@ sub create_archive_dir {
 
 sub check_data_package {
     my ($archivelist, $version, $platform) = @_;
+    return 1 if $expt_type eq 'qualification';  # Short cicuit if we have a qualification run since we just won't care.
 
     log_msg(" $info Checking for mandatory, run specific data...\n");
 
@@ -541,7 +575,9 @@ sub copy_tarfile {
         print "\tMD5 Hash = " . $init_tarball_md5 . "\n"; 
         print "========================================\n\n";
     }
-	log_msg(" Copying archive tarball to '$$archive_dir'.\n");
+    
+    # TODO: Clean up
+	#log_msg(" Copying archive tarball to '$$archive_dir'.\n");
 
     if ( DEBUG_OUTPUT ) {
         print "\n==============  $debug  ===============\n";
@@ -558,6 +594,8 @@ sub copy_tarfile {
 		log_msg(" $info Archive successfully copied to archive storage device.\n");
 	}
 
+    log_msg(" $info Skipping remote MD5sum check for now.  Trying rsync to see if that's better.\n");
+=cut
 	# check integrity of the tarball
 	log_msg(" Calculating MD5 hash for copied archive.\n");
     my $moved_archive = "$$archive_dir/$$archivename";
@@ -571,13 +609,18 @@ sub copy_tarfile {
 
 	log_msg(" Comparing the MD5 hash value for local and fileshare copies of archive.\n");
 	if ( $init_tarball_md5 ne $post_tarball_md5 ) {
-		log_msg(" $err The md5sum for the archive does not agree after moving to the storage location. Retry the transfer manually\n");
+		log_msg(" $err The md5sum for the archive does not agree after moving to the storage location. Retry the 
+                  transfer manually\n");
         halt( \$expt_dir, 2 );
 	} else {
 		log_msg(" $info The md5sum for the archive is in agreement. The local copy will now be deleted.\n");
 		unlink( $$archivename );
 	}
     return $post_tarball_md5;
+=cut
+    log_msg(" $info Deleting local copy of data.\n");
+    unlink( $$archivename );
+    return $init_tarball_md5;
 }
 
 sub generate_md5sum {
@@ -585,7 +628,7 @@ sub generate_md5sum {
     my $md5_list = 'md5sum.txt';
     open(my $md5_fh, ">>", $md5_list);
     my $num_procs = 48;
-    print "\t$note Process queue is ===> $num_procs\n" if DEBUG_OUTPUT;
+    print "\t$note Num processed selected is ===> $num_procs\n" if DEBUG_OUTPUT;
 
     my $fork = new Parallel::ForkManager($num_procs);
     my $parent_pid = $$;
@@ -622,7 +665,6 @@ sub find_mount_point {
         my @elems = split(/\s+/);
         ($filesys, $mount) = @elems[0,6];
     }
-    #my ($filesys_mount) = map{/^((?:\/+[-.\w+]+)+)/} <$mount_data>;
     my @mount_elems = split(/\//, $mount);
     my @archive_elems = split(/\//, $$archive_dir);
     my @remainder;
@@ -645,8 +687,6 @@ sub send_mail {
     my ($status, $case, $outdir, $md5sum, $type) = @_;
     my $mount_point = find_mount_point($outdir);
 
-    my @additional_recipients;
-
     $$case //= "---"; 
     my ($pgm_name) = $run_name =~ /(?:S5-)?([PM]C[C123456]-\d+)/;
     $pgm_name //= 'Unknown';
@@ -655,9 +695,8 @@ sub send_mail {
     my $template_path = dirname(abs_path($0)) . "/templates/";
     my $target = 'simsdj@mail.nih.gov';
     
-    if ( $r_and_d || $type eq 'general' || DEBUG_OUTPUT ) {
-        @additional_recipients = '';
-    } else {
+    my @additional_recipients = '';
+    if ($$type eq 'clinical' and ! DEBUG_OUTPUT) {
         @additional_recipients = qw( 
         harringtonrd@mail.nih.gov
         vivekananda.datta@nih.gov
@@ -693,7 +732,7 @@ sub send_mail {
             $msg = "$template_path/clinical_archive_success.html";
             $cc_list = join( ";", @additional_recipients );
         }
-        elsif ($$type eq 'general') {
+        elsif ($$type eq 'general' || 'qualification') {
             $msg = "$template_path/general_archive_success.html";
             $cc_list = '';
         }
@@ -875,7 +914,8 @@ sub log_msg {
 sub copy_data {
 	my ( $file, $location ) = @_;
 	log_msg(" Copying file '$file' to '$location'...\n");
-	if (sys_cmd(\"cp $file $location") != 0) {
+	#if (sys_cmd(\"cp $file $location") != 0) {
+	if (sys_cmd(\"rsync -a $file $location") != 0) {
         log_msg(" $err There was an issue copying '$file' to '$location'!\n");
         return 1;
     } 
