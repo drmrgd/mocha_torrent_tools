@@ -15,15 +15,15 @@ use Data::Dump;
 use constant DEBUG => 0;
 
 my $scriptname = basename($0);
-my $version = "4.0.090518";
+my $version = "3.2.052019";
 my $description = <<"EOT";
-Using a sampleKey.txt file, rename files by associating them with the samples 
-indicated in the sampleKey file. 
+Using a sampleKey.txt file, rename files by associating them with the samples
+indicated in the sampleKey file.  
 EOT
 
 my $usage = <<"EOT";
 USAGE: $scriptname [options] <sampleKey.txt> <files_to_rename> 
-    -k, --keep      Keep the barcode string and just add the sample ID to the 
+    -k, --keep      Keep the barcode string and just add the sample ID to the
                     name.
     -s, --string    Add an additional string to the sample name, right after the
                     replaced barcode string
@@ -74,9 +74,10 @@ my $samplekey = shift;
 my @input_files = @ARGV;
 
 open( my $sk_fh, "<", $samplekey ); 
-my %sample_hash = map{ split } <$sk_fh>;
-die "ERROR: No barcodes found in sampleKey.txt file!\n" unless grep {
-    $_ =~ /(IonXpress|IonCodeTag|TagSequencing)/} keys %sample_hash;
+my %sample_hash = map{ chomp; split(/\t/) } <$sk_fh>;
+unless (grep {$_ =~ /(IonXpress|IonCode|TagSequencing)/} keys %sample_hash) {
+    die "ERROR: No barcodes found in sampleKey.txt file!\n" 
+}
 close $sk_fh;
 
 if (grep {/Tag/} keys %sample_hash and ! $tagseq) {
@@ -110,10 +111,7 @@ for my $file ( @input_files ) {
         : ($new_name = $sample_hash{$barcode});
     $new_name .= "_${string}"  if $string; # Adding custom string
     $new_name .= "_${barcode}" if $keep;   # Keeping orig barcode string in.
-    $new_name .= "$rest";
-
-    # If we're doing a dry run, just output what will happen.  Else make the 
-    # change
+    $new_name .= "_$rest";
     ( $noact ) 
         ? (print "$file renamed as $new_name\n") 
         : (move( $file, $new_name) );
